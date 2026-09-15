@@ -29,6 +29,7 @@
 	// Assuming $i18n.languages is an array of language codes
 	$: loadLocale($i18n.languages);
 
+	import { onDestroy, onMount } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import { quintOut } from 'svelte/easing';
 
@@ -56,6 +57,40 @@
 	export let hide = false;
 
 	export let onChange: Function = () => {};
+
+	let fullExpanded = false;
+	let contentContainer: HTMLElement | null = null;
+	let isOverflowing = false;
+	let resizeObserver: ResizeObserver | null = null;
+
+	const checkOverflow = () => {
+		if (contentContainer) {
+			isOverflowing = contentContainer.scrollHeight > 500;
+		}
+	};
+
+	$: if (open && contentContainer) {
+		checkOverflow();
+	}
+
+	onMount(() => {
+		if (typeof ResizeObserver !== 'undefined') {
+			resizeObserver = new ResizeObserver(() => {
+				checkOverflow();
+			});
+			if (contentContainer) {
+				resizeObserver.observe(contentContainer);
+			}
+		}
+	});
+
+	$: if (resizeObserver && contentContainer) {
+		resizeObserver.observe(contentContainer);
+	}
+
+	onDestroy(() => {
+		resizeObserver?.disconnect();
+	});
 
 	const toggleOpen = () => {
 		if (disabled) {
@@ -166,7 +201,28 @@
 								e.stopPropagation();
 							}}
 						>
-							<slot name="content" />
+							{#if attributes?.type === 'reasoning'}
+								<div
+									bind:this={contentContainer}
+									class="w-full {fullExpanded ? '' : 'max-h-[500px] overflow-y-auto'}"
+									on:scroll={checkOverflow}
+								>
+									<slot name="content" />
+								</div>
+								{#if isOverflowing || fullExpanded}
+									<button
+										type="button"
+										class="mt-1 text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition"
+										on:click|stopPropagation={() => {
+											fullExpanded = !fullExpanded;
+										}}
+									>
+										{fullExpanded ? $i18n.t('Show less') : $i18n.t('Show more')}
+									</button>
+								{/if}
+							{:else}
+								<slot name="content" />
+							{/if}
 						</div>
 					{/if}
 				{/if}
@@ -177,7 +233,28 @@
 	{#if !grow}
 		{#if open && !hide}
 			<div transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}>
-				<slot name="content" />
+				{#if attributes?.type === 'reasoning'}
+					<div
+						bind:this={contentContainer}
+						class="w-full {fullExpanded ? '' : 'max-h-[500px] overflow-y-auto'}"
+						on:scroll={checkOverflow}
+					>
+						<slot name="content" />
+					</div>
+					{#if isOverflowing || fullExpanded}
+						<button
+							type="button"
+							class="mt-1 text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition"
+							on:click|stopPropagation={() => {
+								fullExpanded = !fullExpanded;
+							}}
+						>
+							{fullExpanded ? $i18n.t('Show less') : $i18n.t('Show more')}
+						</button>
+					{/if}
+				{:else}
+					<slot name="content" />
+				{/if}
 			</div>
 		{/if}
 	{/if}

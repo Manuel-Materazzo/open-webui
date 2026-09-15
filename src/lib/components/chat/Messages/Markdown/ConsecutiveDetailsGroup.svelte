@@ -15,6 +15,7 @@
 	import FullHeightIframe from '$lib/components/common/FullHeightIframe.svelte';
 
 	import { settings } from '$lib/stores';
+	import { tick } from 'svelte';
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 
@@ -42,6 +43,15 @@
 	export let onResolve: (callId: string, approved: boolean) => void = () => {};
 
 	let open = $settings?.expandDetails ?? false;
+
+	let reasoningScrollContainer: HTMLElement | null = null;
+	let userScrolledReasoning = false;
+
+	const handleReasoningScroll = () => {
+		if (!reasoningScrollContainer) return;
+		const { scrollTop, scrollHeight, clientHeight } = reasoningScrollContainer;
+		userScrolledReasoning = scrollHeight - scrollTop - clientHeight > 30;
+	};
 
 	function parseJSONString(str: string) {
 		try {
@@ -107,6 +117,11 @@
 			t?.attributes?.status !== 'incomplete' &&
 			t?.attributes?.done !== 'true'
 	);
+	$: activeReasoningToken = tokens.find(
+		(t) => t?.attributes?.type === 'reasoning' && t?.attributes?.done !== 'true' && !messageDone
+	);
+	$: hasActiveReasoning = !!activeReasoningToken;
+	$: hasActive = hasActiveToolCalls || hasActiveReasoning;
 	$: hasRejected = tokens.some(
 		(t) => t?.attributes?.type === 'tool_calls' && t?.attributes?.status === 'rejected'
 	);
@@ -118,6 +133,18 @@
 	);
 
 	$: codeInterpreterCount = tokens.filter((t) => t?.attributes?.type === 'code_interpreter').length;
+
+	$: if (activeReasoningToken?.text && reasoningScrollContainer && !userScrolledReasoning) {
+		tick().then(() => {
+			if (reasoningScrollContainer && !userScrolledReasoning) {
+				reasoningScrollContainer.scrollTop = reasoningScrollContainer.scrollHeight;
+			}
+		});
+	}
+
+	$: if (!activeReasoningToken) {
+		userScrolledReasoning = false;
+	}
 
 	// Collect all embeds from tool_calls tokens
 	$: allEmbeds = (() => {
@@ -174,7 +201,11 @@
 		return detail;
 	})();
 
-	$: prefixText = hasActiveToolCalls ? $i18n.t('Exploring') : $i18n.t('Explored');
+	$: prefixText = hasActiveToolCalls
+		? $i18n.t('Exploring')
+		: hasActiveReasoning
+			? (summaryText ? $i18n.t('Exploring') : $i18n.t('Thinking...'))
+			: (toolCallCount > 0 ? $i18n.t('Explored') : $i18n.t('Thought'));
 </script>
 
 <div {id} class="w-full min-w-0">
@@ -199,7 +230,7 @@
 		>
 			<div class="flex items-center gap-1.5 min-w-0">
 				<!-- Status icon -->
-				{#if hasActiveToolCalls}
+				{#if hasActive}
 					<div>
 						<Spinner className="size-4" />
 					</div>
@@ -223,7 +254,7 @@
 
 				<!-- Summary text -->
 				<div class="flex-1 line-clamp-1">
-					<span class="text-gray-600 dark:text-gray-300 {hasActiveToolCalls ? 'shimmer' : ''}"
+					<span class="text-gray-600 dark:text-gray-300 {hasActive ? 'shimmer' : ''}"
 						>{prefixText}</span
 					>
 					{#if summaryText}
@@ -264,6 +295,17 @@
 			</div>
 		</div>
 	</div>
+
+	{#if !open && activeReasoningToken && (activeReasoningToken.text || '').trim()}
+		<div
+			bind:this={reasoningScrollContainer}
+			on:scroll={handleReasoningScroll}
+			class="mt-1.5 max-h-[500px] overflow-y-auto rounded-xl bg-gray-50/70 dark:bg-gray-850/50 border border-gray-100 dark:border-gray-800 p-3 text-xs text-gray-600 dark:text-gray-300 font-mono whitespace-pre-wrap break-words"
+			transition:slide={{ duration: 200, easing: quintOut, axis: 'y' }}
+		>
+			{decode(activeReasoningToken.text || '').replace(/^> /gm, '')}
+		</div>
+	{/if}
 
 	{#if !open && resolvable && pendingToolTokens.length > 1}
 		<div class="mt-1 space-y-0.5">

@@ -12,9 +12,11 @@
 
 ## 🛠️ Custom Features & Improvements
 
-List of custom enhancements and fixes applied on top of upstream:
-
 - **Thinking / Reasoning Tool Call Fallback**: Automatically detects and extracts tool calls placed inside `<think>` / reasoning blocks or raw text outputs (e.g., XML `<tool_call>` with `<arg_key>` / `<arg_value>` pairs or embedded JSON) by small and reasoning models, enabling agentic tool execution even when the model does not emit native provider tool call deltas.
+- **Agentic & Reasoning UI Enhancements (Live Thinking & Compact Accordions)**:
+  - **Live Thinking Stream**: Displays a 500px scrollable live-preview box under closed agentic accordions while the model is actively thinking (with auto-scroll tracking new tokens), automatically collapsing when reasoning finishes or the next action/final answer appears.
+  - **Auto-Expanded Thought Sub-Accordions**: Thought/reasoning sub-accordions are expanded by default when the main accordion is opened, capped at 500px height with a "Show more" / "Show less" toggle to prevent layout shifts on tall thinking blocks.
+  - **Dual-Block Tool Call Inspection**: Tool call details separate inputs (arguments) and outputs (results) into distinct 500px capped scrollable blocks with independent "Show more" / "Show less" controls.
 
 ---
 

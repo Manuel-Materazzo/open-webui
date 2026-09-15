@@ -7,6 +7,7 @@
 	import type { i18n as i18nType } from 'i18next';
 	const i18n = getContext<Writable<i18nType>>('i18n');
 
+	import { onDestroy, onMount } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import { quintOut } from 'svelte/easing';
 
@@ -42,8 +43,72 @@
 
 	const RESULT_PREVIEW_LIMIT = 10000;
 	let expandedResult = false;
+	let expandedInput = false;
+	let expandedOutput = false;
+	let inputContainer: HTMLElement | null = null;
+	let outputContainer: HTMLElement | null = null;
+	let inputOverflowing = false;
+	let outputOverflowing = false;
+	let inputResizeObserver: ResizeObserver | null = null;
+	let outputResizeObserver: ResizeObserver | null = null;
 
-	$: if (!open) expandedResult = false;
+	const checkInputOverflow = () => {
+		if (inputContainer) {
+			inputOverflowing = inputContainer.scrollHeight > 500;
+		}
+	};
+
+	const checkOutputOverflow = () => {
+		if (outputContainer) {
+			outputOverflowing = outputContainer.scrollHeight > 500;
+		}
+	};
+
+	$: if (open && inputContainer) {
+		checkInputOverflow();
+	}
+
+	$: if (open && outputContainer) {
+		checkOutputOverflow();
+	}
+
+	$: if (!open) {
+		expandedResult = false;
+		expandedInput = false;
+		expandedOutput = false;
+	}
+
+	onMount(() => {
+		if (typeof ResizeObserver !== 'undefined') {
+			inputResizeObserver = new ResizeObserver(() => {
+				checkInputOverflow();
+			});
+			if (inputContainer) {
+				inputResizeObserver.observe(inputContainer);
+			}
+
+			outputResizeObserver = new ResizeObserver(() => {
+				checkOutputOverflow();
+			});
+			if (outputContainer) {
+				outputResizeObserver.observe(outputContainer);
+			}
+		}
+	});
+
+	$: if (inputResizeObserver && inputContainer) {
+		inputResizeObserver.observe(inputContainer);
+	}
+
+	$: if (outputResizeObserver && outputContainer) {
+		outputResizeObserver.observe(outputContainer);
+	}
+
+	onDestroy(() => {
+		inputResizeObserver?.disconnect();
+		outputResizeObserver?.disconnect();
+	});
+
 	export let buttonClassName =
 		'py-1 text-[0.9375rem] text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition';
 
@@ -297,26 +362,43 @@
 								{$i18n.t('Input')}
 							</div>
 
-							{#if parsedArgs}
-								<div class="px-1 space-y-0.5">
-									{#each Object.entries(parsedArgs) as [key, value]}
-										<div class="flex gap-2 text-xs py-0.5">
-											<span class="font-normal text-gray-600 dark:text-gray-400 shrink-0"
-												>{key}</span
-											>
-											<span class="text-gray-800 dark:text-gray-200 break-all"
-												>{typeof value === 'object' ? JSON.stringify(value) : value}</span
-											>
-										</div>
-									{/each}
-								</div>
-							{:else}
-								<div class="tool-call-body w-full max-w-none!">
-									<pre
-										class="text-xs text-gray-600 dark:text-gray-300 whitespace-pre font-mono bg-gray-50 dark:bg-gray-900 rounded-lg p-2 overflow-x-auto">{formatJSONString(
-											args
-										)}</pre>
-								</div>
+							<div
+								bind:this={inputContainer}
+								class="w-full {expandedInput ? '' : 'max-h-[500px] overflow-y-auto'}"
+								on:scroll={checkInputOverflow}
+							>
+								{#if parsedArgs}
+									<div class="px-1 space-y-0.5">
+										{#each Object.entries(parsedArgs) as [key, value]}
+											<div class="flex gap-2 text-xs py-0.5">
+												<span class="font-normal text-gray-600 dark:text-gray-400 shrink-0"
+													>{key}</span
+												>
+												<span class="text-gray-800 dark:text-gray-200 break-all"
+													>{typeof value === 'object' ? JSON.stringify(value) : value}</span
+												>
+											</div>
+										{/each}
+									</div>
+								{:else}
+									<div class="tool-call-body w-full max-w-none!">
+										<pre
+											class="text-xs text-gray-600 dark:text-gray-300 whitespace-pre font-mono bg-gray-50 dark:bg-gray-900 rounded-lg p-2 overflow-x-auto">{formatJSONString(
+												args
+											)}</pre>
+									</div>
+								{/if}
+							</div>
+							{#if inputOverflowing || expandedInput}
+								<button
+									type="button"
+									class="mt-1 px-1 text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition"
+									on:click|stopPropagation={() => {
+										expandedInput = !expandedInput;
+									}}
+								>
+									{expandedInput ? $i18n.t('Show less') : $i18n.t('Show more')}
+								</button>
 							{/if}
 						</div>
 					{/if}
@@ -329,7 +411,11 @@
 							>
 								{$i18n.t('Output')}
 							</div>
-							<div class="w-full max-w-none!">
+							<div
+								bind:this={outputContainer}
+								class="w-full max-w-none! {expandedOutput ? '' : 'max-h-[500px] overflow-y-auto'}"
+								on:scroll={checkOutputOverflow}
+							>
 								{#if typeof parsedResult === 'object' && parsedResult !== null}
 									<pre
 										class="text-xs text-gray-600 dark:text-gray-300 whitespace-pre font-mono bg-gray-50 dark:bg-gray-900 rounded-lg p-2 overflow-x-auto">{JSON.stringify(
@@ -358,6 +444,17 @@
 									{/if}
 								{/if}
 							</div>
+							{#if outputOverflowing || expandedOutput}
+								<button
+									type="button"
+									class="mt-1 px-1 text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition"
+									on:click|stopPropagation={() => {
+										expandedOutput = !expandedOutput;
+									}}
+								>
+									{expandedOutput ? $i18n.t('Show less') : $i18n.t('Show more')}
+								</button>
+							{/if}
 						</div>
 					{/if}
 				</div>

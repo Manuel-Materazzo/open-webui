@@ -454,7 +454,9 @@
 					{:else if textContent.length > 0}
 						<Collapsible
 							title={detailToken.summary}
-							open={$settings?.expandDetails ?? false}
+							open={detailToken?.attributes?.type === 'reasoning'
+								? true
+								: ($settings?.expandDetails ?? false)}
 							attributes={detailToken?.attributes}
 							messageDone={done}
 							className="w-full"
@@ -513,7 +515,7 @@
 		{:else if textContent.length > 0}
 			<Collapsible
 				title={token.summary}
-				open={$settings?.expandDetails ?? false}
+				open={token?.attributes?.type === 'reasoning' ? true : ($settings?.expandDetails ?? false)}
 				attributes={token?.attributes}
 				messageDone={done}
 				className="w-full space-y-2"
