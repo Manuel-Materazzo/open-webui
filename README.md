@@ -10,6 +10,14 @@
 [![Discord](https://img.shields.io/badge/Discord-Open_WebUI-blue?logo=discord&logoColor=white)](https://discord.gg/5rJgQTnV4s)
 [![](https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe8e86)](https://github.com/sponsors/open-webui)
 
+## 🛠️ Custom Features & Improvements
+
+List of custom enhancements and fixes applied on top of upstream:
+
+- **Thinking / Reasoning Tool Call Fallback**: Automatically detects and extracts tool calls placed inside `<think>` / reasoning blocks or raw text outputs (e.g., XML `<tool_call>` with `<arg_key>` / `<arg_value>` pairs or embedded JSON) by small and reasoning models, enabling agentic tool execution even when the model does not emit native provider tool call deltas.
+
+---
+
 Open WebUI is **a home for AI**, a self-hosted AI platform that's **[extensible](https://docs.openwebui.com/features/extensibility/plugin/)**, **[feature-rich](https://docs.openwebui.com/features/)**, user-friendly, and built to run **[entirely offline](https://openwebui.com/sovereign-ai)**. With support for **Ollama** and **OpenAI-compatible APIs**, it gives you a powerful, provider-agnostic interface for both local and cloud-based models.
 
 Passionate about open-source AI? [Join our team →](https://careers.openwebui.com/)
