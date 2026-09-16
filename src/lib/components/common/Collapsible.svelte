@@ -65,7 +65,7 @@
 
 	const checkOverflow = () => {
 		if (contentContainer) {
-			isOverflowing = contentContainer.scrollHeight > 500;
+			isOverflowing = contentContainer.scrollHeight > 200;
 		}
 	};
 
@@ -204,7 +204,7 @@
 							{#if attributes?.type === 'reasoning'}
 								<div
 									bind:this={contentContainer}
-									class="w-full {fullExpanded ? '' : 'max-h-[500px] overflow-y-auto'}"
+									class="w-full {fullExpanded ? '' : 'max-h-[200px] overflow-y-auto'}"
 									on:scroll={checkOverflow}
 								>
 									<slot name="content" />
@@ -236,7 +236,7 @@
 				{#if attributes?.type === 'reasoning'}
 					<div
 						bind:this={contentContainer}
-						class="w-full {fullExpanded ? '' : 'max-h-[500px] overflow-y-auto'}"
+						class="w-full {fullExpanded ? '' : 'max-h-[200px] overflow-y-auto'}"
 						on:scroll={checkOverflow}
 					>
 						<slot name="content" />

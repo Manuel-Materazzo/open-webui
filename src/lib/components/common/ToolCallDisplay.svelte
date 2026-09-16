@@ -54,13 +54,13 @@
 
 	const checkInputOverflow = () => {
 		if (inputContainer) {
-			inputOverflowing = inputContainer.scrollHeight > 500;
+			inputOverflowing = inputContainer.scrollHeight > 200;
 		}
 	};
 
 	const checkOutputOverflow = () => {
 		if (outputContainer) {
-			outputOverflowing = outputContainer.scrollHeight > 500;
+			outputOverflowing = outputContainer.scrollHeight > 200;
 		}
 	};
 
@@ -364,7 +364,7 @@
 
 							<div
 								bind:this={inputContainer}
-								class="w-full {expandedInput ? '' : 'max-h-[500px] overflow-y-auto'}"
+								class="w-full {expandedInput ? '' : 'max-h-[200px] overflow-y-auto'}"
 								on:scroll={checkInputOverflow}
 							>
 								{#if parsedArgs}
@@ -413,7 +413,7 @@
 							</div>
 							<div
 								bind:this={outputContainer}
-								class="w-full max-w-none! {expandedOutput ? '' : 'max-h-[500px] overflow-y-auto'}"
+								class="w-full max-w-none! {expandedOutput ? '' : 'max-h-[200px] overflow-y-auto'}"
 								on:scroll={checkOutputOverflow}
 							>
 								{#if typeof parsedResult === 'object' && parsedResult !== null}

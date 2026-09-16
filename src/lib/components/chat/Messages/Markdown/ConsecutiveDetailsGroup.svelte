@@ -300,7 +300,7 @@
 		<div
 			bind:this={reasoningScrollContainer}
 			on:scroll={handleReasoningScroll}
-			class="mt-1.5 max-h-[500px] overflow-y-auto rounded-xl bg-gray-50/70 dark:bg-gray-850/50 border border-gray-100 dark:border-gray-800 p-3 text-xs text-gray-600 dark:text-gray-300 font-mono whitespace-pre-wrap break-words"
+			class="mt-1.5 max-h-[200px] overflow-y-auto rounded-xl bg-gray-50/70 dark:bg-gray-850/50 border border-gray-100 dark:border-gray-800 p-3 text-xs text-gray-600 dark:text-gray-300 font-mono whitespace-pre-wrap break-words"
 			transition:slide={{ duration: 200, easing: quintOut, axis: 'y' }}
 		>
 			{decode(activeReasoningToken.text || '').replace(/^> /gm, '')}
