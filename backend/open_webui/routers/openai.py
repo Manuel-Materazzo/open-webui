@@ -1612,6 +1612,15 @@ async def generate_chat_completion(
     if not is_streaming_request:
         payload.pop('stream_options', None)
 
+    provider = api_config.get('provider', '')
+    if is_streaming_request and (
+        provider == 'llama.cpp'
+        or payload.get('return_progress') is True
+        or (isinstance(model, dict) and model.get('provider') == 'llama.cpp')
+    ):
+        if payload.get('return_progress') is not False:
+            payload['return_progress'] = True
+
     payload = JSONCodec.dumps(payload)
 
     r = None

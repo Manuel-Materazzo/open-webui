@@ -4907,6 +4907,7 @@ async def streaming_chat_response_handler(response, ctx):
                     nonlocal last_response_id
 
                     response_tool_calls = []
+                    prompt_progress_active = False
 
                     delta_count = 0
                     delta_chunk_size = max(
@@ -5193,6 +5194,33 @@ async def streaming_chat_response_handler(response, ctx):
                                             }
                                         )
 
+                                    if 'prompt_progress' in data:
+                                        prompt_progress = data['prompt_progress']
+                                        if isinstance(prompt_progress, dict):
+                                            total = prompt_progress.get('total', 0)
+                                            processed = prompt_progress.get('processed', 0)
+                                            cache = prompt_progress.get('cache', 0)
+                                            time_ms = prompt_progress.get('time_ms', 0)
+                                            percent = round((processed / total * 100)) if total > 0 else 0
+                                            done = processed >= total if total > 0 else False
+                                            prompt_progress_active = not done
+
+                                            await event_emitter(
+                                                {
+                                                    'type': 'status',
+                                                    'data': {
+                                                        'action': 'prompt_progress',
+                                                        'description': f'Processing prompt... {percent}%',
+                                                        'total': total,
+                                                        'processed': processed,
+                                                        'cache': cache,
+                                                        'time_ms': time_ms,
+                                                        'percent': percent,
+                                                        'done': done,
+                                                    },
+                                                }
+                                            )
+
                                     if not choices:
                                         error = data.get('error', {})
                                         if error:
@@ -5219,6 +5247,23 @@ async def streaming_chat_response_handler(response, ctx):
                                         continue
 
                                     delta = choices[0].get('delta', {})
+                                    if prompt_progress_active and (
+                                        delta.get('content')
+                                        or delta.get('reasoning_content')
+                                        or delta.get('reasoning')
+                                    ):
+                                        prompt_progress_active = False
+                                        await event_emitter(
+                                            {
+                                                'type': 'status',
+                                                'data': {
+                                                    'action': 'prompt_progress',
+                                                    'description': 'Prompt processed',
+                                                    'done': True,
+                                                },
+                                            }
+                                        )
+
                                     delta_type = 'content'
 
                                     # Handle delta annotations
@@ -5849,6 +5894,19 @@ async def streaming_chat_response_handler(response, ctx):
 
                         if extracted_tool_calls:
                             tool_calls.append(_split_tool_calls(extracted_tool_calls))
+
+                    if prompt_progress_active:
+                        prompt_progress_active = False
+                        await event_emitter(
+                            {
+                                'type': 'status',
+                                'data': {
+                                    'action': 'prompt_progress',
+                                    'description': 'Prompt processed',
+                                    'done': True,
+                                },
+                            }
+                        )
 
                 try:
                     await stream_body_handler(response, form_data)

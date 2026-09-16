@@ -1211,7 +1211,19 @@
 
 				if (type === 'status') {
 					if (message?.statusHistory) {
-						message.statusHistory.push(data);
+						if (
+							data?.action &&
+							message.statusHistory.length > 0 &&
+							message.statusHistory[message.statusHistory.length - 1]?.action === data.action &&
+							!message.statusHistory[message.statusHistory.length - 1]?.done
+						) {
+							message.statusHistory[message.statusHistory.length - 1] = {
+								...message.statusHistory[message.statusHistory.length - 1],
+								...data
+							};
+						} else {
+							message.statusHistory.push(data);
+						}
 					} else {
 						message.statusHistory = [data];
 					}
