@@ -8,9 +8,21 @@
 	import { injectCsp } from '$lib/utils/csp';
 
 	import XMark from '$lib/components/icons/XMark.svelte';
+	import Database from '$lib/components/icons/Database.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
+	import SaveToKnowledgeModal from '../SaveToKnowledgeModal.svelte';
 
 	const i18n = getContext('i18n');
+
+	let showSaveToKnowledgeModal = false;
+
+	const getCitationUrls = (cit: any, docs: any[]) => {
+		const targetUrl = cit?.source?.url || (cit?.source?.name?.startsWith('http') ? cit.source.name : docs?.[0]?.source?.url);
+		if (targetUrl && (targetUrl.startsWith('http://') || targetUrl.startsWith('https://'))) {
+			return [{ url: targetUrl, name: cit?.source?.name || targetUrl }];
+		}
+		return [];
+	};
 
 	const CONTENT_PREVIEW_LIMIT = 10000;
 	let expandedDocs: Set<number> = new Set();
@@ -129,15 +141,33 @@
 					{$i18n.t('Citation')}
 				{/if}
 			</div>
-			<button
-				class="self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
-				aria-label={$i18n.t('Close citation modal')}
-				on:click={() => {
-					show = false;
-				}}
-			>
-				<XMark className={'size-4'} />
-			</button>
+			<div class="flex items-center gap-1 self-center">
+				{#if citation?.source?.url || citation?.source?.name?.startsWith('http') || mergedDocuments?.[0]?.source?.url?.includes('http')}
+					{@const targetUrl = citation?.source?.url || (citation?.source?.name?.startsWith('http') ? citation.source.name : mergedDocuments?.[0]?.source?.url)}
+					{#if targetUrl}
+						<Tooltip content={$i18n.t('Save to Knowledge')} placement="top">
+							<button
+								class="self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+								aria-label={$i18n.t('Save to Knowledge')}
+								on:click={() => {
+									showSaveToKnowledgeModal = true;
+								}}
+							>
+								<Database className={'size-4'} />
+							</button>
+						</Tooltip>
+					{/if}
+				{/if}
+				<button
+					class="self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+					aria-label={$i18n.t('Close citation modal')}
+					on:click={() => {
+						show = false;
+					}}
+				>
+					<XMark className={'size-4'} />
+				</button>
+			</div>
 		</div>
 
 		<div class="flex flex-col md:flex-row w-full px-5 pb-5 md:space-x-4">
@@ -268,3 +298,8 @@
 		</div>
 	</div>
 </Modal>
+
+<SaveToKnowledgeModal
+	bind:show={showSaveToKnowledgeModal}
+	urls={getCitationUrls(citation, mergedDocuments)}
+/>

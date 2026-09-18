@@ -4,8 +4,11 @@
 	const i18n = getContext('i18n');
 
 	import Modal from '$lib/components/common/Modal.svelte';
+	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
+	import Database from '$lib/components/icons/Database.svelte';
 	import CitationModal from './CitationModal.svelte';
+	import SaveToKnowledgeModal from '../SaveToKnowledgeModal.svelte';
 
 	export let id = '';
 	export let show = false;
@@ -14,12 +17,30 @@
 	export let showRelevance = true;
 
 	let showCitationModal = false;
+	let showSaveToKnowledgeModal = false;
 	let selectedCitation: any = null;
 
 	export const showCitation = (citation) => {
 		selectedCitation = citation;
 		showCitationModal = true;
 	};
+
+	const extractWebUrls = (cits: any[]) => {
+		const list: Array<{ url: string; name?: string }> = [];
+		const seen = new Set<string>();
+
+		for (const cit of cits ?? []) {
+			const targetUrl = cit?.source?.url || (cit?.source?.name?.startsWith('http') ? cit.source.name : null);
+			if (targetUrl && (targetUrl.startsWith('http://') || targetUrl.startsWith('https://')) && !seen.has(targetUrl)) {
+				seen.add(targetUrl);
+				list.push({ url: targetUrl, name: cit?.source?.name || targetUrl });
+			}
+		}
+
+		return list;
+	};
+
+	$: webUrls = extractWebUrls(citations);
 
 	const decodeString = (str: string) => {
 		try {
@@ -43,14 +64,30 @@
 			<div class=" text-sm font-medium self-center capitalize">
 				{$i18n.t('Citations')}
 			</div>
-			<button
-				class="self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
-				on:click={() => {
-					show = false;
-				}}
-			>
-				<XMark className={'size-4'} />
-			</button>
+			<div class="flex items-center gap-1 self-center">
+				{#if webUrls.length > 0}
+					<Tooltip content={$i18n.t('Save to Knowledge')} placement="top">
+						<button
+							class="self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+							aria-label={$i18n.t('Save to Knowledge')}
+							on:click={() => {
+								showSaveToKnowledgeModal = true;
+							}}
+						>
+							<Database className={'size-4'} />
+						</button>
+					</Tooltip>
+				{/if}
+				<button
+					class="self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+					aria-label={$i18n.t('Close')}
+					on:click={() => {
+						show = false;
+					}}
+				>
+					<XMark className={'size-4'} />
+				</button>
+			</div>
 		</div>
 
 		<div class="flex flex-col md:flex-row w-full px-6 pb-5 md:space-x-4">
@@ -80,3 +117,8 @@
 		</div>
 	</div>
 </Modal>
+
+<SaveToKnowledgeModal
+	bind:show={showSaveToKnowledgeModal}
+	urls={webUrls}
+/>

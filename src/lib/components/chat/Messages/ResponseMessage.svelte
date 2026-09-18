@@ -43,7 +43,8 @@
 	import ProfileImage from './ProfileImage.svelte';
 	import Image from '$lib/components/common/Image.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import RateComment from './RateComment.svelte';
+	import SaveToKnowledgeModal from './SaveToKnowledgeModal.svelte';
+	import Database from '$lib/components/icons/Database.svelte';
 	import WebSearchResults from './ResponseMessage/WebSearchResults.svelte';
 	import Sparkles from '$lib/components/icons/Sparkles.svelte';
 
@@ -205,7 +206,70 @@
 	let loadingSpeech = false;
 	let speakAbort: AbortController | null = null;
 
-	let showRateComment = false;
+	let showSaveToKnowledgeModal = false;
+
+	const extractUrlsFromMessage = (msg: any) => {
+		const urls: Array<{ url: string; name?: string }> = [];
+		const seen = new Set<string>();
+
+		const addUrl = (url: string, name?: string) => {
+			if (!url || typeof url !== 'string') return;
+			const clean = url.trim();
+			if ((clean.startsWith('http://') || clean.startsWith('https://')) && !seen.has(clean)) {
+				seen.add(clean);
+				urls.push({ url: clean, name: name || clean });
+			}
+		};
+
+		if (msg?.sources) {
+			for (const source of msg.sources) {
+				if (source?.source?.url) {
+					addUrl(source.source.url, source.source.name);
+				} else if (source?.source?.name?.startsWith('http')) {
+					addUrl(source.source.name, source.source.name);
+				}
+				if (source?.metadata) {
+					for (const meta of source.metadata) {
+						if (meta?.source?.startsWith('http')) {
+							addUrl(meta.source, meta.name || meta.source);
+						}
+					}
+				}
+			}
+		}
+
+		if (msg?.status?.urls) {
+			for (const url of msg.status.urls) {
+				addUrl(url);
+			}
+		}
+		if (msg?.status?.items) {
+			for (const item of msg.status.items) {
+				if (item?.link) {
+					addUrl(item.link, item?.title || item.link);
+				}
+			}
+		}
+
+		if (msg?.statusHistory) {
+			for (const status of msg.statusHistory) {
+				if (status?.urls) {
+					for (const url of status.urls) {
+						addUrl(url);
+					}
+				}
+				if (status?.items) {
+					for (const item of status.items) {
+						if (item?.link) {
+							addUrl(item.link, item?.title || item.link);
+						}
+					}
+				}
+			}
+		}
+
+		return urls;
+	};
 
 	const copyToClipboard = async (text) => {
 		text = removeAllDetails(text);
@@ -538,8 +602,6 @@
 		await tick();
 
 		if (!details) {
-			showRateComment = true;
-
 			if (!updatedMessage.annotation?.tags && (message?.content ?? '') !== '') {
 				// attempt to generate tags
 				const tags = await generateTags(localStorage.token, message.model, messages, chatId).catch(
@@ -1238,84 +1300,21 @@
 									</Tooltip>
 								{/if}
 
-								{#if !readOnly}
-									{#if !$temporaryChatEnabled && ($config?.features.enable_message_rating ?? true) && ($user?.role === 'admin' || ($user?.permissions?.chat?.rate_response ?? true))}
-										<Tooltip content={$i18n.t('Good Response')} placement="bottom">
-											<button
-												aria-label={$i18n.t('Good Response')}
-												class="{isLastMessage || ($settings?.highContrastMode ?? false)
-													? 'visible'
-													: 'hover-reveal'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg {(
-													message?.annotation?.rating ?? ''
-												).toString() === '1'
-													? 'bg-gray-100 dark:bg-gray-800'
-													: ''} dark:hover:text-white hover:text-black transition disabled:cursor-progress disabled:hover:bg-transparent"
-												disabled={feedbackLoading}
-												on:click={async () => {
-													await feedbackHandler(1);
-													window.setTimeout(() => {
-														document
-															.getElementById(`message-feedback-${message.id}`)
-															?.scrollIntoView();
-													}, 0);
-												}}
-											>
-												<svg
-													aria-hidden="true"
-													stroke="currentColor"
-													fill="none"
-													stroke-width="2.3"
-													viewBox="0 0 24 24"
-													stroke-linecap="round"
-													stroke-linejoin="round"
-													class="w-4 h-4"
-													xmlns="http://www.w3.org/2000/svg"
-												>
-													<path
-														d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"
-													/>
-												</svg>
-											</button>
-										</Tooltip>
-
-										<Tooltip content={$i18n.t('Bad Response')} placement="bottom">
-											<button
-												aria-label={$i18n.t('Bad Response')}
-												class="{isLastMessage || ($settings?.highContrastMode ?? false)
-													? 'visible'
-													: 'hover-reveal'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg {(
-													message?.annotation?.rating ?? ''
-												).toString() === '-1'
-													? 'bg-gray-100 dark:bg-gray-800'
-													: ''} dark:hover:text-white hover:text-black transition disabled:cursor-progress disabled:hover:bg-transparent"
-												disabled={feedbackLoading}
-												on:click={async () => {
-													await feedbackHandler(-1);
-													window.setTimeout(() => {
-														document
-															.getElementById(`message-feedback-${message.id}`)
-															?.scrollIntoView();
-													}, 0);
-												}}
-											>
-												<svg
-													aria-hidden="true"
-													stroke="currentColor"
-													fill="none"
-													stroke-width="2.3"
-													viewBox="0 0 24 24"
-													stroke-linecap="round"
-													stroke-linejoin="round"
-													class="w-4 h-4"
-													xmlns="http://www.w3.org/2000/svg"
-												>
-													<path
-														d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"
-													/>
-												</svg>
-											</button>
-										</Tooltip>
-									{/if}
+								{#if !readOnly && visibleResponseContent}
+									<Tooltip content={$i18n.t('Save to Knowledge')} placement="bottom">
+										<button
+											aria-label={$i18n.t('Save to Knowledge')}
+											class="{isLastMessage || ($settings?.highContrastMode ?? false)
+												? 'visible'
+												: 'hover-reveal'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition"
+											on:click={() => {
+												showSaveToKnowledgeModal = true;
+											}}
+										>
+											<Database className="w-4 h-4" />
+										</button>
+									</Tooltip>
+								{/if}
 
 									{#if isLastMessage && ($user?.role === 'admin' || ($user?.permissions?.chat?.continue_response ?? true))}
 										<Tooltip content={$i18n.t('Continue Response')} placement="bottom">
@@ -1360,7 +1359,6 @@
 												type="button"
 												class="hidden regenerate-response-button"
 												on:click={() => {
-													showRateComment = false;
 													regenerateResponse(message);
 
 													(model?.actions ?? []).forEach((action) => {
@@ -1379,7 +1377,6 @@
 
 											<RegenerateMenu
 												onRegenerate={(prompt = null) => {
-													showRateComment = false;
 													regenerateResponse(message, prompt);
 
 													(model?.actions ?? []).forEach((action) => {
@@ -1430,7 +1427,6 @@
 														? 'visible'
 														: 'hover-reveal'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition regenerate-response-button"
 													on:click={() => {
-														showRateComment = false;
 														regenerateResponse(message);
 
 														(model?.actions ?? []).forEach((action) => {
@@ -1589,17 +1585,11 @@
 						{/if}
 					</div>
 
-					{#if message.done && showRateComment}
-						<RateComment
-							bind:message
-							bind:show={showRateComment}
-							on:save={async (e) => {
-								await feedbackHandler(null, {
-									...e.detail
-								});
-							}}
-						/>
-					{/if}
+					<SaveToKnowledgeModal
+						bind:show={showSaveToKnowledgeModal}
+						content={visibleResponseContent}
+						urls={extractUrlsFromMessage(message)}
+					/>
 
 					{#if (isLastMessage || ($settings?.keepFollowUpPrompts ?? false)) && message.done && !readOnly && (message?.followUps ?? []).length > 0}
 						<div class="my-2.5" in:fade={{ duration: 100 }}>
