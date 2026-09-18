@@ -539,7 +539,7 @@ class ExternalKnowledgeConnectionListResponse(BaseModel):
 
 
 EXTERNAL_KNOWLEDGE_CONNECTIONS_CONFIG_KEY = 'external_knowledge.connections'
-EXTERNAL_KNOWLEDGE_PROVIDERS = {'qdrant', 'milvus', 'pgvector'}
+EXTERNAL_KNOWLEDGE_PROVIDERS = {'qdrant', 'milvus', 'pgvector', 'meilisearch'}
 
 
 def _get_external_connection_provider_and_config(form_data: ExternalKnowledgeConnectionForm) -> tuple[str, dict]:
@@ -581,7 +581,7 @@ def _get_normalized_external_source(source: ExternalKnowledgeSourceForm, provide
 
     config = source.config or {}
     allowed_keys = {'content_field', 'metadata_field', 'document_id_field'}
-    if provider in {'qdrant', 'milvus'}:
+    if provider in {'qdrant', 'milvus', 'meilisearch'}:
         allowed_keys.add('vector_field')
     if provider == 'pgvector':
         allowed_keys.update({'table_name', 'collection_field', 'vector_field'})

@@ -4,9 +4,11 @@ import re
 import time
 from typing import Any, Optional
 
+import aiohttp
 from open_webui.config import RAG_EMBEDDING_QUERY_PREFIX
 from open_webui.models.config import Config
 from open_webui.models.knowledge import KnowledgeModel
+from open_webui.utils.session_pool import get_session
 
 log = logging.getLogger(__name__)
 
@@ -289,6 +291,89 @@ async def _retrieve_pgvector(connection, auth_config, knowledge, query, count, e
     return [_normalize_result(row, mapping, knowledge, distance=row.get('distance')) for row in rows]
 
 
+async def _retrieve_meilisearch(connection, auth_config, knowledge, query, count, embedding_function) -> list[dict]:
+    config = connection.get('config') or {}
+    external = (knowledge.meta or {}).get('external', {})
+    source = external.get('source') or {}
+    index_name = source.get('name')
+    if not index_name:
+        raise RuntimeError('Meilisearch index is not configured')
+    source_config = _source_config(knowledge)
+    content_field = source_config.get('content_field') or 'text'
+    metadata_field = source_config.get('metadata_field') or 'metadata'
+    document_id_field = source_config.get('document_id_field') or 'id'
+    score_field = source_config.get('score_field') or '_rankingScore'
+
+    endpoint = (connection.get('endpoint') or '').rstrip('/')
+    if not endpoint:
+        raise RuntimeError('Meilisearch endpoint is not configured')
+
+    search_url = f'{endpoint}/indexes/{index_name}/search'
+
+    search_payload = {
+        'q': query,
+        'limit': count,
+        'showRankingScore': True,
+    }
+
+    if embedding_function:
+        try:
+            vector = await embedding_function(query, prefix=RAG_EMBEDDING_QUERY_PREFIX)
+            if vector:
+                search_payload['vector'] = vector
+        except Exception as exc:
+            log.warning(f'Failed to compute embedding for Meilisearch query: {exc}')
+
+    headers = {'Content-Type': 'application/json'}
+    api_key = (auth_config or {}).get('api_key') or (auth_config or {}).get('token')
+    if api_key:
+        headers['Authorization'] = f'Bearer {api_key}'
+
+    timeout = config.get('timeout') or 30
+
+    session = await get_session()
+    async with session.post(
+        search_url,
+        json=search_payload,
+        headers=headers,
+        timeout=aiohttp.ClientTimeout(total=timeout),
+    ) as resp:
+        if resp.status != 200:
+            error_body = await resp.text()
+            # If Meilisearch vector search failed due to index settings/version, retry with text query
+            if 'vector' in search_payload and resp.status in (400, 422):
+                log.info(
+                    'Meilisearch vector search failed (%s: %s), retrying with keyword search only',
+                    resp.status,
+                    error_body,
+                )
+                search_payload.pop('vector', None)
+                async with session.post(
+                    search_url,
+                    json=search_payload,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=timeout),
+                ) as retry_resp:
+                    if retry_resp.status != 200:
+                        retry_error = await retry_resp.text()
+                        raise RuntimeError(f'Meilisearch error ({retry_resp.status}): {retry_error}')
+                    data = await retry_resp.json()
+            else:
+                raise RuntimeError(f'Meilisearch error ({resp.status}): {error_body}')
+        else:
+            data = await resp.json()
+
+    mapping = {
+        'content_field': content_field,
+        'metadata_field': metadata_field,
+        'document_id_field': document_id_field,
+        'score_field': score_field,
+    }
+
+    hits = data.get('hits') or []
+    return [_normalize_result(hit, mapping, knowledge, distance=hit.get('_rankingScore')) for hit in hits]
+
+
 async def retrieve_external_knowledge(
     request,
     knowledge: KnowledgeModel,
@@ -350,6 +435,17 @@ async def retrieve_external_knowledge_for_connection(
         elif provider == 'pgvector':
             chunks.extend(
                 await _retrieve_pgvector(
+                    connection,
+                    auth_config,
+                    knowledge,
+                    query,
+                    count,
+                    getattr(request.app.state, 'EMBEDDING_FUNCTION', None),
+                )
+            )
+        elif provider == 'meilisearch':
+            chunks.extend(
+                await _retrieve_meilisearch(
                     connection,
                     auth_config,
                     knowledge,

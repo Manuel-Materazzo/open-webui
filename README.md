@@ -18,6 +18,7 @@
   - **Live Thinking Stream**: Displays a 200px scrollable live-preview box under closed agentic accordions while the model is actively thinking (with auto-scroll tracking new tokens), automatically collapsing when reasoning finishes or the next action/final answer appears.
   - **Auto-Expanded Thought Sub-Accordions**: Thought/reasoning sub-accordions are expanded by default when the main accordion is opened, capped at 200px height with a "Show more" / "Show less" toggle to prevent layout shifts on tall thinking blocks.
   - **Dual-Block Tool Call Inspection**: Tool call details separate inputs (arguments) and outputs (results) into distinct 200px capped scrollable blocks with independent "Show more" / "Show less" controls.
+- **External Knowledge Sources Support for Meilisearch**: Extends external knowledge base integrations to support **Meilisearch** alongside Qdrant, Milvus, and pgvector. Enables querying external Meilisearch indexes via vector embeddings (hybrid/vector search) and full-text keyword search with ranking scores, configurable field mappings (`content_field`, `metadata_field`, `document_id_field`), and live connection testing in the Admin Settings UI.
 
 ---
 
