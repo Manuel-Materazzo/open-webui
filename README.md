@@ -23,7 +23,7 @@
   - **Native UI Integration**: Integrated "Save to Knowledge" button across the assistant message action bar, citation view modal, and full citations list.
   - **Dual Content Ingestion**: Supports saving chat message responses directly as Markdown documents or batch-saving web search results.
   - **Streamlined Message Actions**: Cleaned up message toolbar by removing upvote/downvote buttons in favor of knowledge actions.
-
+- various openterminal related fixes and performance improvements.
 ---
 
 Open WebUI is **a home for AI**, a self-hosted AI platform that's **[extensible](https://docs.openwebui.com/features/extensibility/plugin/)**, **[feature-rich](https://docs.openwebui.com/features/)**, user-friendly, and built to run **[entirely offline](https://openwebui.com/sovereign-ai)**. With support for **Ollama** and **OpenAI-compatible APIs**, it gives you a powerful, provider-agnostic interface for both local and cloud-based models.

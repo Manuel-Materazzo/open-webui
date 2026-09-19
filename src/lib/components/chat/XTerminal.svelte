@@ -19,6 +19,9 @@
 	export let connecting = false;
 	let resizeObserver: ResizeObserver | null = null;
 	let pingInterval: ReturnType<typeof setInterval> | null = null;
+	let currentSessionId: string | null = null;
+	let currentSessionBase: string | null = null;
+	let currentSessionHeaders: Record<string, string> = {};
 
 	// Resolve the active terminal server's info for the WebSocket URL
 	const getTerminalInfo = (): {
@@ -78,9 +81,16 @@
 					method: 'POST',
 					headers: createHeaders
 				});
-				if (!res.ok) throw new Error(`Failed to create session: ${res.status}`);
+				if (!res.ok) {
+					const errData = await res.json().catch(() => null);
+					const errMsg = errData?.error || errData?.detail || `${res.status} ${res.statusText}`;
+					throw new Error(`Failed to create session: ${errMsg}`);
+				}
 				const session = await res.json();
 				sessionId = session.id;
+				currentSessionId = sessionId;
+				currentSessionBase = `${base}/api/terminals`;
+				currentSessionHeaders = createHeaders;
 
 				const wsBase = base.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
 				wsUrl = `${wsBase}/api/terminals/${sessionId}`;
@@ -96,9 +106,16 @@
 					method: 'POST',
 					headers: proxyHeaders
 				});
-				if (!res.ok) throw new Error(`Failed to create session: ${res.status}`);
+				if (!res.ok) {
+					const errData = await res.json().catch(() => null);
+					const errMsg = errData?.error || errData?.detail || `${res.status} ${res.statusText}`;
+					throw new Error(`Failed to create session: ${errMsg}`);
+				}
 				const session = await res.json();
 				sessionId = session.id;
+				currentSessionId = sessionId;
+				currentSessionBase = `${base}/terminals/${info.serverId}/api/terminals`;
+				currentSessionHeaders = proxyHeaders;
 
 				const wsBase = base.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
 				wsUrl = `${wsBase}/terminals/${info.serverId}/api/terminals/${sessionId}`;
@@ -173,6 +190,18 @@
 		if (ws) {
 			ws.close();
 			ws = null;
+		}
+		if (currentSessionId && currentSessionBase) {
+			const sid = currentSessionId;
+			const sBase = currentSessionBase;
+			const sHeaders = { ...currentSessionHeaders };
+			currentSessionId = null;
+			currentSessionBase = null;
+			currentSessionHeaders = {};
+			fetch(`${sBase}/${sid}`, {
+				method: 'DELETE',
+				headers: sHeaders
+			}).catch(() => null);
 		}
 		connected = false;
 		connecting = false;

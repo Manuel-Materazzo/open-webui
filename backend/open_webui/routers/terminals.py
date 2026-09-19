@@ -326,12 +326,23 @@ async def ws_terminal(
     # For orchestrator-backed servers, pass user_id
     upstream_params['user_id'] = user.id
     context_id = terminal_context_id(connection, {'chat_id': chat_id}, 'chat')
-    upstream_headers = {}
+    upstream_headers = {
+        'X-User-Id': user.id,
+    }
+    if chat_id:
+        upstream_headers['X-Session-Id'] = chat_id
     if terminal_context_config(connection, 'chat').get('context_id') == 'chat_id' and not context_id:
         await ws.close(code=4003, reason='A saved chat is required for this terminal')
         return
     if context_id:
         upstream_headers[TERMINAL_CONTEXT_HEADER] = context_id
+
+    auth_type = connection.get('auth_type', 'bearer')
+    if auth_type == 'bearer':
+        upstream_headers.update(bearer_auth_header(connection.get('key', '')))
+    elif auth_type == 'session':
+        upstream_headers.update(bearer_auth_header(token))
+
 
     import urllib.parse
 
@@ -420,6 +431,27 @@ async def ws_terminal(
     except Exception as e:
         log.exception('Terminal WebSocket proxy error: %s', e)
     finally:
+        # Clean up session upstream so orphaned sessions do not accumulate
+        try:
+            delete_headers = {'X-User-Id': user.id}
+            if chat_id:
+                delete_headers['X-Session-Id'] = chat_id
+            if context_id:
+                delete_headers[TERMINAL_CONTEXT_HEADER] = context_id
+            if auth_type == 'bearer':
+                delete_headers.update(bearer_auth_header(connection.get('key', '')))
+            elif auth_type == 'session':
+                delete_headers.update(bearer_auth_header(token))
+
+            async with session.delete(
+                f'{base_url}/api/terminals/{safe_session_id}',
+                headers=delete_headers,
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            ):
+                pass
+        except Exception:
+            pass
+
         await session.close()
         if opened:
             await publish_event(
