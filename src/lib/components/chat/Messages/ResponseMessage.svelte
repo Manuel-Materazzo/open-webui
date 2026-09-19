@@ -1582,7 +1582,6 @@
 									{/if}
 								{/if}
 							{/if}
-						{/if}
 					</div>
 
 					<SaveToKnowledgeModal
