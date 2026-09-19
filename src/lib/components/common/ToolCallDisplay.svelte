@@ -220,8 +220,10 @@
 	$: isActive = isPreparing || isExecuting;
 	$: isError = attributes?.status === 'failed' || (isDone && isToolResultError(result));
 
-	$: parsedArgs = parseArguments(args);
-	$: parsedResult = parseJSONString(result);
+	$: parsedArgs = (open || needsApproval || needsInput) ? parseArguments(args) : null;
+	// Defer result parsing until the accordion is open — avoids JSON.parse on megabytes
+	// of terminal output for every collapsed command on every streaming token.
+	$: parsedResult = open ? parseJSONString(result) : null;
 
 	const toggleOpen = () => {
 		open = !open;

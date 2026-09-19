@@ -309,7 +309,22 @@
 		};
 	};
 
-	$: contextUsage = getContextUsage() ?? (contextCompactionEnabled ? serverContextUsage : null);
+	// Throttle context-usage recalculation to at most once per second.
+	// Without this, JSON.stringify(message.output) runs 30-60×/sec during streaming,
+	// serializing megabytes of terminal history on every token and blocking the main thread.
+	let _lastContextUsageResult: ReturnType<typeof getContextUsage> = null;
+	let _lastContextUsageTime = 0;
+	const getContextUsageThrottled = () => {
+		const now = Date.now();
+		if (now - _lastContextUsageTime < 1000 && _lastContextUsageResult !== null) {
+			return _lastContextUsageResult;
+		}
+		_lastContextUsageTime = now;
+		_lastContextUsageResult = getContextUsage();
+		return _lastContextUsageResult;
+	};
+
+	$: contextUsage = getContextUsageThrottled() ?? (contextCompactionEnabled ? serverContextUsage : null);
 	$: embeddedHeaderTitle = embeddedTitle || $chatTitle || $i18n.t('Chat');
 
 	let selectedToolIds: string[] = [];
@@ -1141,6 +1156,10 @@
 		});
 	};
 
+	// Debounce file-tree refresh: many rapid run_command events collapse into one reload
+	// 500 ms after the last command fires, rather than invalidating the cache per command.
+	let _runCommandDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
 	const terminalEventHandler = (type: string, data: any) => {
 		if (type === 'terminal:display_file') {
 			if (!data?.path) return;
@@ -1150,7 +1169,11 @@
 			if (!data?.path) return;
 			showFileNavDir.set(data.path);
 		} else if (type === 'terminal:run_command') {
-			showFileNavDir.set('/');
+			if (_runCommandDebounceTimer !== null) clearTimeout(_runCommandDebounceTimer);
+			_runCommandDebounceTimer = setTimeout(() => {
+				_runCommandDebounceTimer = null;
+				showFileNavDir.set('/');
+			}, 500);
 		}
 	};
 

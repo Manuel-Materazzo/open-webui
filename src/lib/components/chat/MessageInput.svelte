@@ -521,7 +521,21 @@
 		}, 1600);
 	};
 
-	$: statusContextUsage = contextUsage ?? getLocalContextUsage();
+	// Throttle local context-usage recalculation to at most once per second.
+	// Prevents JSON.stringify(message.output) from running 30-60×/sec during streaming.
+	let _lastLocalContextUsageResult: ReturnType<typeof getLocalContextUsage> = null;
+	let _lastLocalContextUsageTime = 0;
+	const getLocalContextUsageThrottled = () => {
+		const now = Date.now();
+		if (now - _lastLocalContextUsageTime < 1000 && _lastLocalContextUsageResult !== null) {
+			return _lastLocalContextUsageResult;
+		}
+		_lastLocalContextUsageTime = now;
+		_lastLocalContextUsageResult = getLocalContextUsage();
+		return _lastLocalContextUsageResult;
+	};
+
+	$: statusContextUsage = contextUsage ?? getLocalContextUsageThrottled();
 	$: contextHasThreshold = Number(statusContextUsage?.threshold) > 0;
 	$: contextPercent = contextHasThreshold
 		? Math.max(0, Math.round(statusContextUsage?.percent ?? 0))

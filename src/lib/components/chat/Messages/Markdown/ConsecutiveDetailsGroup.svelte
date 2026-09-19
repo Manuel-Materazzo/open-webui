@@ -54,11 +54,18 @@
 	};
 
 	function parseJSONString(str: string) {
-		try {
-			return parseJSONString(JSON.parse(str));
-		} catch (e) {
-			return str;
+		// Iteratively unwrap nested JSON-encoded strings. Avoids infinite recursion
+		// that the previous recursive form hit on scalar values (e.g. JSON.parse('5')
+		// → 5 → parseJSONString(5) → JSON.parse(5) → 5 → infinite loop).
+		let value: any = str;
+		while (typeof value === 'string') {
+			try {
+				value = JSON.parse(value);
+			} catch {
+				break;
+			}
 		}
+		return value;
 	}
 
 	function isToolResultError(value: unknown): boolean {
@@ -125,11 +132,30 @@
 	$: hasRejected = tokens.some(
 		(t) => t?.attributes?.type === 'tool_calls' && t?.attributes?.status === 'rejected'
 	);
+
+	// Cache isToolResultError results by tool-call ID so we only run the expensive
+	// decode() + JSON.parse() chain once per completed call, not on every token frame.
+	let errorCache = new Map<string, boolean>();
+	function cachedIsToolResultError(t: typeof tokens[number]): boolean {
+		const id = t?.attributes?.id ?? '';
+		if (errorCache.has(id)) return errorCache.get(id)!;
+		const result = isToolResultError(decode(t?.text ?? ''));
+		if (id) errorCache.set(id, result);
+		return result;
+	}
+	// Evict stale cache entries when the token list changes (e.g. new chat branch).
+	$: {
+		const currentIds = new Set(tokens.map((t) => t?.attributes?.id ?? '').filter(Boolean));
+		for (const key of errorCache.keys()) {
+			if (!currentIds.has(key)) errorCache.delete(key);
+		}
+	}
+
 	$: hasError = tokens.some(
 		(t) =>
 			t?.attributes?.type === 'tool_calls' &&
 			(t?.attributes?.status === 'failed' ||
-				(t?.attributes?.done === 'true' && isToolResultError(decode(t?.text ?? ''))))
+				(t?.attributes?.done === 'true' && cachedIsToolResultError(t)))
 	);
 
 	$: codeInterpreterCount = tokens.filter((t) => t?.attributes?.type === 'code_interpreter').length;
