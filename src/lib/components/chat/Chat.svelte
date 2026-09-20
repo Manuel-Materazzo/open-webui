@@ -1240,12 +1240,14 @@
 							message.statusHistory[message.statusHistory.length - 1]?.action === data.action &&
 							!message.statusHistory[message.statusHistory.length - 1]?.done
 						) {
-							message.statusHistory[message.statusHistory.length - 1] = {
-								...message.statusHistory[message.statusHistory.length - 1],
+							const updatedStatusHistory = [...message.statusHistory];
+							updatedStatusHistory[updatedStatusHistory.length - 1] = {
+								...updatedStatusHistory[updatedStatusHistory.length - 1],
 								...data
 							};
+							message.statusHistory = updatedStatusHistory;
 						} else {
-							message.statusHistory.push(data);
+							message.statusHistory = [...message.statusHistory, data];
 						}
 					} else {
 						message.statusHistory = [data];
