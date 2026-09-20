@@ -65,14 +65,30 @@
 
 	let selectedModelIdx = null;
 
-	let message = structuredClone(history.messages[messageId]);
+	let message = { ...history.messages[messageId] };
 	$: if (history.messages) {
 		const source = history.messages[messageId];
 		if (source) {
-			if (message.content !== source.content || message.done !== source.done) {
-				message = structuredClone(source);
-			} else if (!equal(message, source)) {
-				message = structuredClone(source);
+			if (
+				message.content !== source.content ||
+				message.done !== source.done ||
+				message.output !== source.output ||
+				message.output?.length !== source.output?.length ||
+				message.error !== source.error
+			) {
+				message = { ...source };
+			} else if (
+				message.sources !== source.sources ||
+				message.statusHistory !== source.statusHistory ||
+				message.status !== source.status ||
+				message.files !== source.files ||
+				message.embeds !== source.embeds ||
+				message.code_executions !== source.code_executions ||
+				message.annotation !== source.annotation ||
+				message.followUps !== source.followUps ||
+				message.usage !== source.usage
+			) {
+				message = { ...source };
 			}
 		}
 	}

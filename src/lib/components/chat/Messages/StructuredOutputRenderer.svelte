@@ -123,31 +123,34 @@
 							buttonClassName={detailButtonClassName}
 						/>
 					{:else if detailToken.text?.length > 0}
+						{@const isReasoning = detailToken.attributes?.type === 'reasoning'}
+						{@const isDefaultOpen = isReasoning ? true : ($settings?.expandDetails ?? false)}
 						<Collapsible
 							title={getDetailTitle(detailToken)}
-							open={detailToken.attributes?.type === 'reasoning'
-								? true
-								: ($settings?.expandDetails ?? false)}
+							open={isDefaultOpen}
 							attributes={getDetailAttributes(detailToken)}
 							messageDone={done}
 							className="w-full"
 							buttonClassName={detailButtonClassName}
+							let:open={isOpen}
 						>
 							<div class="mb-1.5" slot="content">
-								<div class="markdown-prose">
-									<Markdown
-										id={`${id}-${displayItem.id}-${detailIndex}-detail`}
-										{chatId}
-										{messageId}
-										content={detailToken.text}
-										{done}
-										{save}
-										{preview}
-										{compactPreview}
-										{editCodeBlock}
-										{onToolCallResolved}
-									/>
-								</div>
+								{#if isOpen}
+									<div class="markdown-prose">
+										<Markdown
+											id={`${id}-${displayItem.id}-${detailIndex}-detail`}
+											{chatId}
+											{messageId}
+											content={detailToken.text}
+											{done}
+											{save}
+											{preview}
+											{compactPreview}
+											{editCodeBlock}
+											{onToolCallResolved}
+										/>
+									</div>
+								{/if}
 							</div>
 						</Collapsible>
 					{:else}
@@ -183,31 +186,34 @@
 				buttonClassName={detailButtonClassName}
 			/>
 		{:else if detailToken.text?.length > 0}
+			{@const isReasoning = detailToken.attributes?.type === 'reasoning'}
+			{@const isDefaultOpen = isReasoning ? true : ($settings?.expandDetails ?? false)}
 			<Collapsible
 				title={getDetailTitle(detailToken)}
-				open={detailToken.attributes?.type === 'reasoning'
-					? true
-					: ($settings?.expandDetails ?? false)}
+				open={isDefaultOpen}
 				attributes={getDetailAttributes(detailToken)}
 				messageDone={done}
 				className="w-full space-y-2"
 				buttonClassName={detailButtonClassName}
+				let:open={isOpen}
 			>
 				<div class="mb-1.5" slot="content">
-					<div class="markdown-prose">
-						<Markdown
-							id={`${id}-${displayItem.id}-detail`}
-							{chatId}
-							{messageId}
-							content={detailToken.text}
-							{done}
-							{save}
-							{preview}
-							{compactPreview}
-							{editCodeBlock}
-							{onToolCallResolved}
-						/>
-					</div>
+					{#if isOpen}
+						<div class="markdown-prose">
+							<Markdown
+								id={`${id}-${displayItem.id}-detail`}
+								{chatId}
+								{messageId}
+								content={detailToken.text}
+								{done}
+								{save}
+								{preview}
+								{compactPreview}
+								{editCodeBlock}
+								{onToolCallResolved}
+							/>
+						</div>
+					{/if}
 				</div>
 			</Collapsible>
 		{:else}

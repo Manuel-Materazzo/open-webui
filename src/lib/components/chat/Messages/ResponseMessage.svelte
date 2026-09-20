@@ -123,24 +123,34 @@
 	export let selectedModels = [];
 
 	let messageSource = history.messages[messageId];
-	let message: MessageType = structuredClone(messageSource);
+	let message: MessageType = { ...messageSource };
 	$: if (history.messages) {
 		const source = history.messages[messageId];
 		if (source) {
-			// Fast path for the fields that change most often while streaming.
-			// Responses streams update output even when legacy content is unchanged.
 			if (source !== messageSource) {
 				messageSource = source;
-				message = structuredClone(source);
+				message = { ...source };
 			} else if (
 				message.content !== source.content ||
 				message.done !== source.done ||
-				message.output?.length !== source.output?.length
+				message.output !== source.output ||
+				message.output?.length !== source.output?.length ||
+				message.error !== source.error
 			) {
-				message = structuredClone(source);
-			} else if (!equal(message, source)) {
-				// Slow path: full comparison for infrequent changes (sources, annotations, status, etc.)
-				message = structuredClone(source);
+				// Fast path: shallow copy source to trigger reactivity without structuredClone
+				message = { ...source };
+			} else if (
+				message.sources !== source.sources ||
+				message.statusHistory !== source.statusHistory ||
+				message.status !== source.status ||
+				message.files !== source.files ||
+				message.embeds !== source.embeds ||
+				message.code_executions !== source.code_executions ||
+				message.annotation !== source.annotation ||
+				message.followUps !== source.followUps ||
+				message.usage !== source.usage
+			) {
+				message = { ...source };
 			}
 		}
 	}
