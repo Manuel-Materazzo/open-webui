@@ -207,7 +207,7 @@
 									class="w-full {fullExpanded ? '' : 'max-h-[200px] overflow-y-auto'}"
 									on:scroll={checkOverflow}
 								>
-									<slot name="content" />
+									<slot name="content" {open} />
 								</div>
 								{#if isOverflowing || fullExpanded}
 									<button
@@ -221,7 +221,7 @@
 									</button>
 								{/if}
 							{:else}
-								<slot name="content" />
+								<slot name="content" {open} />
 							{/if}
 						</div>
 					{/if}
@@ -239,7 +239,7 @@
 						class="w-full {fullExpanded ? '' : 'max-h-[200px] overflow-y-auto'}"
 						on:scroll={checkOverflow}
 					>
-						<slot name="content" />
+						<slot name="content" {open} />
 					</div>
 					{#if isOverflowing || fullExpanded}
 						<button
@@ -253,7 +253,7 @@
 						</button>
 					{/if}
 				{:else}
-					<slot name="content" />
+					<slot name="content" {open} />
 				{/if}
 			</div>
 		{/if}

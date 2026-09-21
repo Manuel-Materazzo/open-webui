@@ -137,7 +137,7 @@
 				message.output?.length !== source.output?.length ||
 				message.error !== source.error
 			) {
-				// Fast path: shallow copy source to trigger reactivity without structuredClone
+				messageSource = source;
 				message = { ...source };
 			} else if (
 				message.sources !== source.sources ||
@@ -150,6 +150,7 @@
 				message.followUps !== source.followUps ||
 				message.usage !== source.usage
 			) {
+				messageSource = source;
 				message = { ...source };
 			}
 		}

@@ -65,17 +65,22 @@
 
 	let selectedModelIdx = null;
 
-	let message = { ...history.messages[messageId] };
+	let messageSource = history.messages[messageId];
+	let message = { ...messageSource };
 	$: if (history.messages) {
 		const source = history.messages[messageId];
 		if (source) {
-			if (
+			if (source !== messageSource) {
+				messageSource = source;
+				message = { ...source };
+			} else if (
 				message.content !== source.content ||
 				message.done !== source.done ||
 				message.output !== source.output ||
 				message.output?.length !== source.output?.length ||
 				message.error !== source.error
 			) {
+				messageSource = source;
 				message = { ...source };
 			} else if (
 				message.sources !== source.sources ||
@@ -88,6 +93,7 @@
 				message.followUps !== source.followUps ||
 				message.usage !== source.usage
 			) {
+				messageSource = source;
 				message = { ...source };
 			}
 		}

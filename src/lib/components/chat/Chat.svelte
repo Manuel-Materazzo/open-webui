@@ -1214,6 +1214,7 @@
 		}
 	};
 
+	let chatEventRAF: number | null = null;
 	const chatEventHandler = async (event, cb) => {
 		console.log(event);
 
@@ -1428,6 +1429,18 @@
 				}
 
 				history.messages[event.message_id] = message;
+				if (data?.done || type === 'chat:tasks:cancel') {
+					if (chatEventRAF) {
+						cancelAnimationFrame(chatEventRAF);
+						chatEventRAF = null;
+					}
+					history = history;
+				} else if (!chatEventRAF) {
+					chatEventRAF = requestAnimationFrame(() => {
+						chatEventRAF = null;
+						history = history;
+					});
+				}
 			}
 		} else {
 			// Non-active chat completion: queue stays in the global store.
@@ -1665,6 +1678,10 @@
 				$socket?.off('events', chatEventHandler);
 				$socket?.off('connect', handleSocketConnect);
 				dismissContextCompactionToast();
+				if (chatEventRAF) {
+					cancelAnimationFrame(chatEventRAF);
+					chatEventRAF = null;
+				}
 				audioQueueInstance?.destroy();
 				audioQueue.set(null);
 			} catch (e) {
