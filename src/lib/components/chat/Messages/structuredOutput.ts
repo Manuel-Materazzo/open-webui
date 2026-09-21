@@ -235,19 +235,36 @@ function buildToolCallToken(item: OutputItem, toolOutputByCallId: Record<string,
 	};
 }
 
+export const TOOL_CALL_TAG_REGEX =
+	/<(tool_call|tool-call|tool_calls|function_call|function-call)[^>]*>[\s\S]*?(?:<\/\1>|$)/gi;
+
 function buildReasoningToken(item: OutputItem, isLastItem: boolean) {
 	const duration = item.duration ?? '';
 	const isDone = isDoneStatus(item.status) || item.duration !== undefined || !isLastItem;
-	const text = getReasoningText(item)
-		.split('\n')
-		.map((line) => (line.startsWith('>') ? line : `> ${line}`))
-		.join('\n');
+	const rawText = getReasoningText(item);
+	const hasToolCall =
+		item.attributes?.tool_call === 'true' ||
+		item.attributes?.tool_call === true ||
+		/<(tool_call|tool-call|tool_calls|function_call|function-call)[^>]*>/i.test(rawText);
+
+	const cleanedRawText = hasToolCall ? rawText.replace(TOOL_CALL_TAG_REGEX, '').trim() : rawText.trim();
+	const text = cleanedRawText
+		? cleanedRawText
+				.split('\n')
+				.map((line) => (line.startsWith('>') ? line : `> ${line}`))
+				.join('\n')
+		: '';
 
 	return {
-		summary: isDone ? `Thought for ${duration || 0} seconds` : 'Thinking...',
+		summary: hasToolCall
+			? 'Thought about a tool call'
+			: isDone
+				? `Thought for ${duration || 0} seconds`
+				: 'Thinking...',
 		text,
 		attributes: {
 			type: 'reasoning',
+			...(hasToolCall ? { tool_call: 'true' } : {}),
 			done: isDone ? 'true' : 'false',
 			duration: String(duration)
 		}

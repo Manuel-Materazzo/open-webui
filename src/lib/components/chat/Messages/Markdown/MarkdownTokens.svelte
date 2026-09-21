@@ -98,9 +98,18 @@
 	};
 
 	const getDetailTextContent = (token) => {
-		return decode(token?.text || '')
+		let text = decode(token?.text || '')
 			.replace(/<summary>.*?<\/summary>/gi, '')
 			.trim();
+		if (token?.attributes?.type === 'reasoning') {
+			text = text
+				.replace(
+					/<(tool_call|tool-call|tool_calls|function_call|function-call)[^>]*>[\s\S]*?(?:<\/\1>|$)/gi,
+					''
+				)
+				.trim();
+		}
+		return text;
 	};
 
 	let resolvingCallId = '';
@@ -452,12 +461,25 @@
 							buttonClassName={detailButtonClassName}
 						/>
 					{:else if textContent.length > 0}
+						{@const isReasoning = detailToken?.attributes?.type === 'reasoning'}
+						{@const isToolCallReasoning =
+							isReasoning &&
+							(detailToken?.attributes?.tool_call === 'true' ||
+								detailToken?.attributes?.tool_call === true ||
+								/<(tool_call|tool-call|tool_calls|function_call|function-call)[^>]*>/i.test(
+									detailToken?.text || ''
+								))}
 						<Collapsible
-							title={detailToken.summary}
-							open={detailToken?.attributes?.type === 'reasoning'
-								? true
+							title={isToolCallReasoning ? $i18n.t('Thought about a tool call') : detailToken.summary}
+							open={isReasoning
+								? isToolCallReasoning
+									? false
+									: true
 								: ($settings?.expandDetails ?? false)}
-							attributes={detailToken?.attributes}
+							attributes={{
+								...detailToken?.attributes,
+								...(isToolCallReasoning ? { tool_call: 'true' } : {})
+							}}
 							messageDone={done}
 							className="w-full"
 							buttonClassName={detailButtonClassName}
@@ -468,8 +490,11 @@
 									id={`${id}-${tokenIdx}-${detailIdx}-d`}
 									{chatId}
 									{messageId}
-									tokens={marked.lexer(decode(detailToken.text))}
-									attributes={detailToken?.attributes}
+									tokens={marked.lexer(decode(textContent))}
+									attributes={{
+										...detailToken?.attributes,
+										...(isToolCallReasoning ? { tool_call: 'true' } : {})
+									}}
 									{done}
 									{save}
 									{preview}
@@ -482,11 +507,22 @@
 							</div>
 						</Collapsible>
 					{:else}
+						{@const isReasoning = detailToken?.attributes?.type === 'reasoning'}
+						{@const isToolCallReasoning =
+							isReasoning &&
+							(detailToken?.attributes?.tool_call === 'true' ||
+								detailToken?.attributes?.tool_call === true ||
+								/<(tool_call|tool-call|tool_calls|function_call|function-call)[^>]*>/i.test(
+									detailToken?.text || ''
+								))}
 						<Collapsible
-							title={detailToken.summary}
+							title={isToolCallReasoning ? $i18n.t('Thought about a tool call') : detailToken.summary}
 							open={false}
 							disabled={true}
-							attributes={detailToken?.attributes}
+							attributes={{
+								...detailToken?.attributes,
+								...(isToolCallReasoning ? { tool_call: 'true' } : {})
+							}}
 							messageDone={done}
 							className="w-full"
 							buttonClassName={detailButtonClassName}
@@ -513,10 +549,23 @@
 				buttonClassName={detailButtonClassName}
 			/>
 		{:else if textContent.length > 0}
+			{@const isReasoning = token?.attributes?.type === 'reasoning'}
+			{@const isToolCallReasoning =
+				isReasoning &&
+				(token?.attributes?.tool_call === 'true' ||
+					token?.attributes?.tool_call === true ||
+					/<(tool_call|tool-call|tool_calls|function_call|function-call)[^>]*>/i.test(token?.text || ''))}
 			<Collapsible
-				title={token.summary}
-				open={token?.attributes?.type === 'reasoning' ? true : ($settings?.expandDetails ?? false)}
-				attributes={token?.attributes}
+				title={isToolCallReasoning ? $i18n.t('Thought about a tool call') : token.summary}
+				open={isReasoning
+					? isToolCallReasoning
+						? false
+						: true
+					: ($settings?.expandDetails ?? false)}
+				attributes={{
+					...token?.attributes,
+					...(isToolCallReasoning ? { tool_call: 'true' } : {})
+				}}
 				messageDone={done}
 				className="w-full space-y-2"
 				buttonClassName={detailButtonClassName}
@@ -527,8 +576,11 @@
 						id={`${id}-${tokenIdx}-d`}
 						{chatId}
 						{messageId}
-						tokens={marked.lexer(decode(token.text))}
-						attributes={token?.attributes}
+						tokens={marked.lexer(decode(textContent))}
+						attributes={{
+							...token?.attributes,
+							...(isToolCallReasoning ? { tool_call: 'true' } : {})
+						}}
 						{done}
 						{save}
 						{preview}
@@ -541,11 +593,20 @@
 				</div>
 			</Collapsible>
 		{:else}
+			{@const isReasoning = token?.attributes?.type === 'reasoning'}
+			{@const isToolCallReasoning =
+				isReasoning &&
+				(token?.attributes?.tool_call === 'true' ||
+					token?.attributes?.tool_call === true ||
+					/<(tool_call|tool-call|tool_calls|function_call|function-call)[^>]*>/i.test(token?.text || ''))}
 			<Collapsible
-				title={token.summary}
+				title={isToolCallReasoning ? $i18n.t('Thought about a tool call') : token.summary}
 				open={false}
 				disabled={true}
-				attributes={token?.attributes}
+				attributes={{
+					...token?.attributes,
+					...(isToolCallReasoning ? { tool_call: 'true' } : {})
+				}}
 				messageDone={done}
 				className="w-full space-y-2"
 				buttonClassName={detailButtonClassName}

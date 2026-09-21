@@ -129,7 +129,9 @@
 
 				<div class="">
 					{#if attributes?.type === 'reasoning'}
-						{#if (attributes?.done === 'true' || messageDone) && attributes?.duration}
+						{#if attributes?.tool_call === 'true' || attributes?.tool_call === true || title === 'Thought about a tool call'}
+							{$i18n.t('Thought about a tool call')}
+						{:else if (attributes?.done === 'true' || messageDone) && attributes?.duration}
 							{#if attributes.duration < 1}
 								{$i18n.t('Thought for less than a second')}
 							{:else if attributes.duration < 60}

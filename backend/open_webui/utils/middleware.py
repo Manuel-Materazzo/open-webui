@@ -403,6 +403,12 @@ def _parse_arg_value(val_str: str) -> Any:
         return val_str
 
 
+TOOL_CALL_TAG_PATTERN = re.compile(
+    r'<(?P<tag>tool_call|tool-call|tool_calls|function_call|function-call)(?P<attrs>[^>]*)>(?P<body>.*?)(?:</(?P=tag)>|$)',
+    re.DOTALL | re.IGNORECASE,
+)
+
+
 def extract_tool_calls_from_text(text: str, available_tools: dict | set | list | None = None) -> list[dict]:
     """Extract tool calls from text (e.g. reasoning/thinking blocks or raw message content).
 
@@ -5852,6 +5858,27 @@ async def streaming_chat_response_handler(response, ctx):
                             combined_text = '\n'.join(text_sources)
                             if combined_text:
                                 parsed_calls = extract_tool_calls_from_text(combined_text, available_tools=tools_dict)
+                                if parsed_calls and item_type == 'reasoning':
+                                    item_attrs = item.setdefault('attributes', {})
+                                    item_attrs['tool_call'] = True
+                                    for part in (item.get('content', []) or []):
+                                        if isinstance(part, dict) and 'text' in part:
+                                            part['text'] = TOOL_CALL_TAG_PATTERN.sub('', part['text']).strip()
+                                    for detail in (item.get('reasoning_details', []) or []):
+                                        if isinstance(detail, dict) and 'text' in detail:
+                                            detail['text'] = TOOL_CALL_TAG_PATTERN.sub('', detail['text']).strip()
+                                    try:
+                                        reasoning_output_index = output.index(item)
+                                        await emit_response_completion_event(
+                                            {
+                                                'type': 'response.output_item.done',
+                                                'output_index': reasoning_output_index,
+                                                'item': item.copy(),
+                                            }
+                                        )
+                                    except ValueError:
+                                        pass
+
                                 for pc in parsed_calls:
                                     call_id = output_id('fc')
                                     extracted_tool_calls.append(

@@ -124,7 +124,14 @@
 						/>
 					{:else if detailToken.text?.length > 0}
 						{@const isReasoning = detailToken.attributes?.type === 'reasoning'}
-						{@const isDefaultOpen = isReasoning ? true : ($settings?.expandDetails ?? false)}
+						{@const isToolCallReasoning =
+							isReasoning &&
+							(detailToken.attributes?.tool_call === 'true' || detailToken.attributes?.tool_call === true)}
+						{@const isDefaultOpen = isReasoning
+							? isToolCallReasoning
+								? false
+								: true
+							: ($settings?.expandDetails ?? false)}
 						<Collapsible
 							title={getDetailTitle(detailToken)}
 							open={isDefaultOpen}
@@ -185,7 +192,14 @@
 			/>
 		{:else if detailToken.text?.length > 0}
 			{@const isReasoning = detailToken.attributes?.type === 'reasoning'}
-			{@const isDefaultOpen = isReasoning ? true : ($settings?.expandDetails ?? false)}
+			{@const isToolCallReasoning =
+				isReasoning &&
+				(detailToken.attributes?.tool_call === 'true' || detailToken.attributes?.tool_call === true)}
+			{@const isDefaultOpen = isReasoning
+				? isToolCallReasoning
+					? false
+					: true
+				: ($settings?.expandDetails ?? false)}
 			<Collapsible
 				title={getDetailTitle(detailToken)}
 				open={isDefaultOpen}

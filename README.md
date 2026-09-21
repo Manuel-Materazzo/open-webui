@@ -13,7 +13,9 @@
 ## 🛠️ Custom Features & Improvements
 
 - **llama.cpp Prefill Progress Tracking**: Automatically enables and streams real-time prompt processing (prefill) progress from `llama.cpp` backends during streaming completions. Replaces the static waiting bar with an informative live progress indicator showing real-time percentages, processed/total prompt tokens, cached token counts, and an animated progress bar that cleanly transitions upon the first generated token. Configurable per model via Advanced Parameters.
-- **Thinking / Reasoning Tool Call Fallback**: Automatically detects and extracts tool calls placed inside `<think>` / reasoning blocks or raw text outputs (e.g., XML `<tool_call>` with `<arg_key>` / `<arg_value>` pairs or embedded JSON) by small and reasoning models, enabling agentic tool execution even when the model does not emit native provider tool call deltas.
+- **Thinking / Reasoning Tool Call Fallback & Recovery Handling**:
+  - **Automated Fallback Extraction**: Automatically detects and extracts tool calls placed inside `<think>` / reasoning blocks or raw text outputs (e.g., XML `<tool_call>` with `<arg_key>` / `<arg_value>` pairs or embedded JSON) by small and reasoning models, enabling agentic tool execution even when the model does not emit native provider tool call deltas.
+  - **Tool Call Recovery UX ("Thought about a tool call")**: When a tool call is recovered from a thought block, the frontend dynamically re-labels the thinking accordion from the generic duration header (e.g., "Thought for less than a second") to **"Thought about a tool call"**, strips raw XML `<tool_call>` syntax from the thought content, and keeps the think block collapsed by default. If the thought was the tool call only, the dropdown is disabled and kept closed, cleanly hiding raw XML payloads while displaying the executed tool card.
 - **Agentic & Reasoning UI Enhancements (Live Thinking & Compact Accordions)**:
   - **Live Thinking Stream**: Displays a 200px scrollable live-preview box under closed agentic accordions while the model is actively thinking (with auto-scroll tracking new tokens), automatically collapsing when reasoning finishes or the next action/final answer appears.
   - **Auto-Expanded Thought Sub-Accordions**: Thought/reasoning sub-accordions are expanded by default when the main accordion is opened, capped at 200px height with a "Show more" / "Show less" toggle to prevent layout shifts on tall thinking blocks.
@@ -24,7 +26,7 @@
   - **Dual Content Ingestion**: Supports saving chat message responses directly as Markdown documents or batch-saving web search results.
   - **Streamlined Message Actions**: Cleaned up message toolbar by removing upvote/downvote buttons in favor of knowledge actions.
 - **Deferred Chat Title Generation (Zero First-Turn Latency)**: Defers automatic chat title generation until after the assistant finishes generating the first message turn. Prevents eager title requests from queueing ahead of the assistant response on local LLM servers (e.g., Ollama, llama.cpp) and rate-limited providers, eliminating initial response delays when initiating new chats.
-- various openterminal related fixes and performance improvements.
+- **Open Terminal Enhancements**: Various Open Terminal connection stability fixes, session management improvements, and streaming performance optimizations.
 ---
 
 Open WebUI is **a home for AI**, a self-hosted AI platform that's **[extensible](https://docs.openwebui.com/features/extensibility/plugin/)**, **[feature-rich](https://docs.openwebui.com/features/)**, user-friendly, and built to run **[entirely offline](https://openwebui.com/sovereign-ai)**. With support for **Ollama** and **OpenAI-compatible APIs**, it gives you a powerful, provider-agnostic interface for both local and cloud-based models.
