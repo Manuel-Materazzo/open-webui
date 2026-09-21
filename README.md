@@ -23,6 +23,7 @@
   - **Native UI Integration**: Integrated "Save to Knowledge" button across the assistant message action bar, citation view modal, and full citations list.
   - **Dual Content Ingestion**: Supports saving chat message responses directly as Markdown documents or batch-saving web search results.
   - **Streamlined Message Actions**: Cleaned up message toolbar by removing upvote/downvote buttons in favor of knowledge actions.
+- **Deferred Chat Title Generation (Zero First-Turn Latency)**: Defers automatic chat title generation until after the assistant finishes generating the first message turn. Prevents eager title requests from queueing ahead of the assistant response on local LLM servers (e.g., Ollama, llama.cpp) and rate-limited providers, eliminating initial response delays when initiating new chats.
 - various openterminal related fixes and performance improvements.
 ---
 
