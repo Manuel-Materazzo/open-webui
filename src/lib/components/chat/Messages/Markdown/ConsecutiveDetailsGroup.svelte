@@ -15,7 +15,7 @@
 	import FullHeightIframe from '$lib/components/common/FullHeightIframe.svelte';
 
 	import { settings } from '$lib/stores';
-	import { tick } from 'svelte';
+	import { tick, onDestroy } from 'svelte';
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 
@@ -46,12 +46,34 @@
 
 	let reasoningScrollContainer: HTMLElement | null = null;
 	let userScrolledReasoning = false;
+	let reasoningScrollRAF: number | null = null;
+	let isProgrammaticScroll = false;
 
 	const handleReasoningScroll = () => {
-		if (!reasoningScrollContainer) return;
+		if (!reasoningScrollContainer || isProgrammaticScroll) return;
 		const { scrollTop, scrollHeight, clientHeight } = reasoningScrollContainer;
 		userScrolledReasoning = scrollHeight - scrollTop - clientHeight > 30;
 	};
+
+	const scrollToBottomReasoning = () => {
+		if (!reasoningScrollContainer || userScrolledReasoning || reasoningScrollRAF) return;
+		reasoningScrollRAF = requestAnimationFrame(() => {
+			reasoningScrollRAF = null;
+			if (!reasoningScrollContainer || userScrolledReasoning) return;
+			isProgrammaticScroll = true;
+			reasoningScrollContainer.scrollTop = reasoningScrollContainer.scrollHeight;
+			requestAnimationFrame(() => {
+				isProgrammaticScroll = false;
+			});
+		});
+	};
+
+	onDestroy(() => {
+		if (reasoningScrollRAF) {
+			cancelAnimationFrame(reasoningScrollRAF);
+			reasoningScrollRAF = null;
+		}
+	});
 
 	function parseJSONString(str: string) {
 		// Iteratively unwrap nested JSON-encoded strings. Avoids infinite recursion
@@ -168,16 +190,23 @@
 	$: codeInterpreterCount = tokens.filter((t) => t?.attributes?.type === 'code_interpreter').length;
 
 	$: if (activeReasoningToken?.text && reasoningScrollContainer && !userScrolledReasoning) {
-		tick().then(() => {
-			if (reasoningScrollContainer && !userScrolledReasoning) {
-				reasoningScrollContainer.scrollTop = reasoningScrollContainer.scrollHeight;
-			}
-		});
+		scrollToBottomReasoning();
 	}
 
 	$: if (!activeReasoningToken) {
 		userScrolledReasoning = false;
+		if (reasoningScrollRAF) {
+			cancelAnimationFrame(reasoningScrollRAF);
+			reasoningScrollRAF = null;
+		}
 	}
+
+	$: previewReasoningText = (() => {
+		const raw = activeReasoningToken?.text || '';
+		if (!raw) return '';
+		const text = raw.includes('&') ? decode(raw) : raw;
+		return text.replace(/^> ?/gm, '');
+	})();
 
 	// Collect all embeds from tool_calls tokens
 	$: allEmbeds = (() => {
@@ -334,9 +363,8 @@
 			bind:this={reasoningScrollContainer}
 			on:scroll={handleReasoningScroll}
 			class="mt-1.5 max-h-[200px] overflow-y-auto rounded-xl bg-gray-50/70 dark:bg-gray-850/50 border border-gray-100 dark:border-gray-800 p-3 text-xs text-gray-600 dark:text-gray-300 font-mono whitespace-pre-wrap break-words"
-			transition:slide={{ duration: 200, easing: quintOut, axis: 'y' }}
 		>
-			{decode(activeReasoningToken.text || '').replace(/^> /gm, '')}
+			{previewReasoningText}
 		</div>
 	{/if}
 

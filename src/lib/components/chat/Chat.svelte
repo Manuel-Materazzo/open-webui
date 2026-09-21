@@ -1429,7 +1429,12 @@
 				}
 
 				history.messages[event.message_id] = message;
-				if (data?.done || type === 'chat:tasks:cancel') {
+				if (
+					data?.done ||
+					data?.type === 'response.completed' ||
+					data?.type?.endsWith('.done') ||
+					type === 'chat:tasks:cancel'
+				) {
 					if (chatEventRAF) {
 						cancelAnimationFrame(chatEventRAF);
 						chatEventRAF = null;
@@ -2800,7 +2805,6 @@
 		}
 
 		history.messages[message.id] = message;
-		history = history;
 	};
 
 	const chatCompletionEventHandler = async (data, message, chatId) => {
@@ -2862,7 +2866,6 @@
 		}
 
 		history.messages[message.id] = message;
-		history = history;
 
 		if (done) {
 			message.done = true;
