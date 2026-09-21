@@ -123,15 +123,16 @@
 							buttonClassName={detailButtonClassName}
 						/>
 					{:else if detailToken.text?.length > 0}
+						{@const isReasoning = detailToken.attributes?.type === 'reasoning'}
+						{@const isDefaultOpen = isReasoning ? true : ($settings?.expandDetails ?? false)}
 						<Collapsible
 							title={getDetailTitle(detailToken)}
-							open={detailToken.attributes?.type === 'reasoning'
-								? true
-								: ($settings?.expandDetails ?? false)}
+							open={isDefaultOpen}
 							attributes={getDetailAttributes(detailToken)}
 							messageDone={done}
 							className="w-full"
 							buttonClassName={detailButtonClassName}
+
 						>
 							<div class="mb-1.5" slot="content">
 								<div class="markdown-prose">
@@ -183,11 +184,11 @@
 				buttonClassName={detailButtonClassName}
 			/>
 		{:else if detailToken.text?.length > 0}
+			{@const isReasoning = detailToken.attributes?.type === 'reasoning'}
+			{@const isDefaultOpen = isReasoning ? true : ($settings?.expandDetails ?? false)}
 			<Collapsible
 				title={getDetailTitle(detailToken)}
-				open={detailToken.attributes?.type === 'reasoning'
-					? true
-					: ($settings?.expandDetails ?? false)}
+				open={isDefaultOpen}
 				attributes={getDetailAttributes(detailToken)}
 				messageDone={done}
 				className="w-full space-y-2"

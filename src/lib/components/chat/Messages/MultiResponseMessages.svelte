@@ -18,7 +18,6 @@
 	import Skeleton from './Skeleton.svelte';
 	import ProfileImage from './ProfileImage.svelte';
 	import { WEBUI_BASE_URL } from '$lib/constants';
-	import equal from 'fast-deep-equal';
 	import { formatMessageTimestamp, formatMessageTimestampFull } from '$lib/utils';
 	const i18n = getContext('i18n');
 
@@ -65,14 +64,36 @@
 
 	let selectedModelIdx = null;
 
-	let message = structuredClone(history.messages[messageId]);
+	let messageSource = history.messages[messageId];
+	let message = { ...messageSource };
 	$: if (history.messages) {
 		const source = history.messages[messageId];
 		if (source) {
-			if (message.content !== source.content || message.done !== source.done) {
-				message = structuredClone(source);
-			} else if (!equal(message, source)) {
-				message = structuredClone(source);
+			if (source !== messageSource) {
+				messageSource = source;
+				message = { ...source };
+			} else if (
+				message.content !== source.content ||
+				message.done !== source.done ||
+				message.output !== source.output ||
+				message.output?.length !== source.output?.length ||
+				message.error !== source.error
+			) {
+				messageSource = source;
+				message = { ...source };
+			} else if (
+				message.sources !== source.sources ||
+				message.statusHistory !== source.statusHistory ||
+				message.status !== source.status ||
+				message.files !== source.files ||
+				message.embeds !== source.embeds ||
+				message.code_executions !== source.code_executions ||
+				message.annotation !== source.annotation ||
+				message.followUps !== source.followUps ||
+				message.usage !== source.usage
+			) {
+				messageSource = source;
+				message = { ...source };
 			}
 		}
 	}

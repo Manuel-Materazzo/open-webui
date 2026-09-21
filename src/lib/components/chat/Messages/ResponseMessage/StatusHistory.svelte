@@ -3,7 +3,6 @@
 	const i18n = getContext('i18n');
 
 	import StatusItem from './StatusHistory/StatusItem.svelte';
-	import equal from 'fast-deep-equal';
 	export let statusHistory = [];
 	export let expand = false;
 
@@ -15,16 +14,8 @@
 		showHistory = false;
 	}
 
-	let history = [];
-	let status = null;
-
-	$: if (history && history.length > 0) {
-		status = history.at(-1);
-	}
-
-	$: if (!equal(statusHistory, history)) {
-		history = statusHistory;
-	}
+	$: history = statusHistory ?? [];
+	$: status = history && history.length > 0 ? history.at(-1) : null;
 </script>
 
 {#if history && history.length > 0}

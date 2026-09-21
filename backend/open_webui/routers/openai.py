@@ -1613,11 +1613,30 @@ async def generate_chat_completion(
         payload.pop('stream_options', None)
 
     provider = api_config.get('provider', '')
-    if is_streaming_request and (
-        provider == 'llama.cpp'
+    model_id_str = str(model.get('id', '') if isinstance(model, dict) else '')
+    model_name_str = str(model.get('name', '') if isinstance(model, dict) else '')
+    payload_model_str = str(payload.get('model', ''))
+    req_model_str = str(requested_model or '')
+    is_llamacpp = (
+        provider in ('llama.cpp', 'llamacpp')
         or payload.get('return_progress') is True
-        or (isinstance(model, dict) and model.get('provider') == 'llama.cpp')
-    ):
+        or (
+            isinstance(model, dict)
+            and (
+                model.get('provider') in ('llama.cpp', 'llamacpp')
+                or model.get('owned_by') in ('llama.cpp', 'llamacpp')
+            )
+        )
+        or model_id_str.lower().endswith('.gguf')
+        or '.gguf' in model_id_str.lower()
+        or model_name_str.lower().endswith('.gguf')
+        or '.gguf' in model_name_str.lower()
+        or payload_model_str.lower().endswith('.gguf')
+        or '.gguf' in payload_model_str.lower()
+        or req_model_str.lower().endswith('.gguf')
+        or '.gguf' in req_model_str.lower()
+    )
+    if is_streaming_request and is_llamacpp:
         if payload.get('return_progress') is not False:
             payload['return_progress'] = True
 

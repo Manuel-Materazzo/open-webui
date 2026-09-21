@@ -1214,6 +1214,7 @@
 		}
 	};
 
+	let chatEventRAF: number | null = null;
 	const chatEventHandler = async (event, cb) => {
 		console.log(event);
 
@@ -1240,12 +1241,14 @@
 							message.statusHistory[message.statusHistory.length - 1]?.action === data.action &&
 							!message.statusHistory[message.statusHistory.length - 1]?.done
 						) {
-							message.statusHistory[message.statusHistory.length - 1] = {
-								...message.statusHistory[message.statusHistory.length - 1],
+							const updatedStatusHistory = [...message.statusHistory];
+							updatedStatusHistory[updatedStatusHistory.length - 1] = {
+								...updatedStatusHistory[updatedStatusHistory.length - 1],
 								...data
 							};
+							message.statusHistory = updatedStatusHistory;
 						} else {
-							message.statusHistory.push(data);
+							message.statusHistory = [...message.statusHistory, data];
 						}
 					} else {
 						message.statusHistory = [data];
@@ -1426,6 +1429,18 @@
 				}
 
 				history.messages[event.message_id] = message;
+				if (data?.done || type === 'chat:tasks:cancel') {
+					if (chatEventRAF) {
+						cancelAnimationFrame(chatEventRAF);
+						chatEventRAF = null;
+					}
+					history = history;
+				} else if (!chatEventRAF) {
+					chatEventRAF = requestAnimationFrame(() => {
+						chatEventRAF = null;
+						history = history;
+					});
+				}
 			}
 		} else {
 			// Non-active chat completion: queue stays in the global store.
@@ -1663,6 +1678,10 @@
 				$socket?.off('events', chatEventHandler);
 				$socket?.off('connect', handleSocketConnect);
 				dismissContextCompactionToast();
+				if (chatEventRAF) {
+					cancelAnimationFrame(chatEventRAF);
+					chatEventRAF = null;
+				}
 				audioQueueInstance?.destroy();
 				audioQueue.set(null);
 			} catch (e) {

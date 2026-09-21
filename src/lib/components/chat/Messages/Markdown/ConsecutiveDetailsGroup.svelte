@@ -70,7 +70,8 @@
 
 	function isToolResultError(value: unknown): boolean {
 		if (typeof value === 'string') {
-			const text = value.trim().toLowerCase();
+			const trimmed = value.trim();
+			const text = trimmed.toLowerCase();
 			if (
 				text.startsWith('error:') ||
 				text.startsWith('exception:') ||
@@ -78,6 +79,12 @@
 				text.startsWith('http error!')
 			) {
 				return true;
+			}
+
+			// Safeguard: do not run JSON.parse on huge strings (e.g. terminal logs) or strings
+			// that do not look like JSON objects or arrays.
+			if (trimmed.length > 20000 || (!trimmed.startsWith('{') && !trimmed.startsWith('['))) {
+				return false;
 			}
 		}
 

@@ -4908,6 +4908,7 @@ async def streaming_chat_response_handler(response, ctx):
 
                     response_tool_calls = []
                     prompt_progress_active = False
+                    last_prompt_progress_time = 0.0
 
                     delta_count = 0
                     delta_chunk_size = max(
@@ -5205,21 +5206,25 @@ async def streaming_chat_response_handler(response, ctx):
                                             done = processed >= total if total > 0 else False
                                             prompt_progress_active = not done
 
-                                            await event_emitter(
-                                                {
-                                                    'type': 'status',
-                                                    'data': {
-                                                        'action': 'prompt_progress',
-                                                        'description': f'Processing prompt... {percent}%',
-                                                        'total': total,
-                                                        'processed': processed,
-                                                        'cache': cache,
-                                                        'time_ms': time_ms,
-                                                        'percent': percent,
-                                                        'done': done,
-                                                    },
-                                                }
-                                            )
+                                            now = time.time()
+                                            # Throttle progress events to at most once every 250ms, unless completed
+                                            if done or (now - last_prompt_progress_time >= 0.25):
+                                                last_prompt_progress_time = now
+                                                await event_emitter(
+                                                    {
+                                                        'type': 'status',
+                                                        'data': {
+                                                            'action': 'prompt_progress',
+                                                            'description': f'Processing prompt... {percent}%',
+                                                            'total': total,
+                                                            'processed': processed,
+                                                            'cache': cache,
+                                                            'time_ms': time_ms,
+                                                            'percent': percent,
+                                                            'done': done,
+                                                        },
+                                                    }
+                                                )
 
                                     if not choices:
                                         error = data.get('error', {})
