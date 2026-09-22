@@ -101,7 +101,8 @@ def _normalize_result(result: dict, mapping: dict, knowledge: KnowledgeModel, di
         reserved_keys = {
             content_field,
             'content', 'text', 'body', 'vector',
-            '_rankingScore', '_formatted', '_matchesPosition', '_federation'
+            '_rankingScore', '_formatted', '_matchesPosition', '_federation',
+            '_score', '_id', '_index', '_ignored'
         }
         metadata = {
             k: v for k, v in result.items()
@@ -451,6 +452,157 @@ async def _retrieve_meilisearch(connection, auth_config, knowledge, query, count
     return [_normalize_result(hit, mapping, knowledge, distance=hit.get('_rankingScore')) for hit in hits]
 
 
+
+def _format_elasticsearch_error(status: int, error_body: str) -> str:
+    try:
+        data = json.loads(error_body)
+        if isinstance(data, dict):
+            error = data.get('error')
+            if isinstance(error, dict):
+                reason = error.get('reason')
+                error_type = error.get('type')
+                root_causes = error.get('root_cause')
+                if isinstance(root_causes, list) and root_causes:
+                    rc = root_causes[0]
+                    if isinstance(rc, dict) and rc.get('reason'):
+                        reason = rc.get('reason')
+                        error_type = rc.get('type') or error_type
+                if reason:
+                    return f"Elasticsearch error ({status}): {reason}" + (f" ({error_type})" if error_type else "")
+            elif isinstance(error, str):
+                return f"Elasticsearch error ({status}): {error}"
+    except Exception:
+        pass
+    return f"Elasticsearch error ({status}): {error_body}"
+
+
+async def _retrieve_elasticsearch(connection, auth_config, knowledge, query, count, embedding_function) -> list[dict]:
+    config = connection.get('config') or {}
+    external = (knowledge.meta or {}).get('external', {})
+    source = external.get('source') or {}
+    index_name = source.get('name')
+    if not index_name:
+        raise RuntimeError('Elasticsearch index is not configured')
+    source_config = _source_config(knowledge)
+    content_field = source_config.get('content_field') or 'content'
+    metadata_field = source_config.get('metadata_field') or 'metadata'
+    document_id_field = source_config.get('document_id_field') or 'id'
+    score_field = source_config.get('score_field') or '_score'
+    vector_field = source_config.get('vector_field')
+
+    endpoint = (connection.get('endpoint') or '').rstrip('/')
+    if not endpoint:
+        raise RuntimeError('Elasticsearch endpoint is not configured')
+
+    search_url = f'{endpoint}/{index_name}/_search'
+
+    if query.strip():
+        if content_field and content_field != '*':
+            text_query = {
+                'multi_match': {
+                    'query': query,
+                    'fields': [content_field],
+                }
+            }
+        else:
+            text_query = {
+                'query_string': {
+                    'query': query,
+                }
+            }
+    else:
+        text_query = {'match_all': {}}
+
+    search_payload = {
+        'size': count,
+        'query': text_query,
+    }
+
+    if vector_field and embedding_function:
+        try:
+            vector = await embedding_function(query, prefix=RAG_EMBEDDING_QUERY_PREFIX)
+            if vector:
+                search_payload['knn'] = {
+                    'field': vector_field,
+                    'query_vector': vector,
+                    'k': count,
+                    'num_candidates': max(count * 10, 50),
+                }
+        except Exception as exc:
+            log.warning(f'Failed to compute embedding for Elasticsearch query: {exc}')
+
+    headers = {'Content-Type': 'application/json'}
+    api_key = (auth_config or {}).get('api_key') or (auth_config or {}).get('token')
+    if api_key:
+        if api_key.startswith(('ApiKey ', 'Bearer ', 'Basic ')):
+            headers['Authorization'] = api_key
+        elif ':' in api_key and not api_key.endswith('='):
+            import base64
+            encoded = base64.b64encode(api_key.encode()).decode()
+            headers['Authorization'] = f'Basic {encoded}'
+        else:
+            headers['Authorization'] = f'ApiKey {api_key}'
+
+    timeout = config.get('timeout') or 30
+
+    ssl_param = None
+    if config.get('ssl_verify') is False:
+        ssl_param = False
+    elif config.get('ca_cert'):
+        import ssl
+        ssl_param = ssl.create_default_context(cadata=config.get('ca_cert'))
+
+    req_kwargs = {
+        'json': search_payload,
+        'headers': headers,
+        'timeout': aiohttp.ClientTimeout(total=timeout),
+    }
+    if ssl_param is not None:
+        req_kwargs['ssl'] = ssl_param
+
+    session = await get_session()
+    async with session.post(search_url, **req_kwargs) as resp:
+        if resp.status != 200:
+            error_body = await resp.text()
+            if 'knn' in search_payload and resp.status in (400, 422):
+                log.info(
+                    'Elasticsearch kNN vector search failed (%s: %s), retrying with keyword search only',
+                    resp.status,
+                    error_body,
+                )
+                search_payload.pop('knn', None)
+                req_kwargs['json'] = search_payload
+                async with session.post(search_url, **req_kwargs) as retry_resp:
+                    if retry_resp.status != 200:
+                        retry_error = await retry_resp.text()
+                        raise RuntimeError(_format_elasticsearch_error(retry_resp.status, retry_error))
+                    data = await retry_resp.json()
+            else:
+                raise RuntimeError(_format_elasticsearch_error(resp.status, error_body))
+        else:
+            data = await resp.json()
+
+    mapping = {
+        'content_field': content_field,
+        'metadata_field': metadata_field,
+        'document_id_field': document_id_field,
+        'score_field': score_field,
+    }
+
+    hits = (data.get('hits') or {}).get('hits') or []
+    normalized = []
+    for hit in hits:
+        source = hit.get('_source') or hit.get('fields') or {}
+        result = {
+            **source,
+            'id': hit.get('_id'),
+            '_id': hit.get('_id'),
+            '_score': hit.get('_score'),
+        }
+        normalized.append(_normalize_result(result, mapping, knowledge, distance=hit.get('_score')))
+    return normalized
+
+
 async def retrieve_external_knowledge(
     request,
     knowledge: KnowledgeModel,
@@ -523,6 +675,17 @@ async def retrieve_external_knowledge_for_connection(
         elif provider == 'meilisearch':
             chunks.extend(
                 await _retrieve_meilisearch(
+                    connection,
+                    auth_config,
+                    knowledge,
+                    query,
+                    count,
+                    getattr(request.app.state, 'EMBEDDING_FUNCTION', None),
+                )
+            )
+        elif provider == 'elasticsearch':
+            chunks.extend(
+                await _retrieve_elasticsearch(
                     connection,
                     auth_config,
                     knowledge,

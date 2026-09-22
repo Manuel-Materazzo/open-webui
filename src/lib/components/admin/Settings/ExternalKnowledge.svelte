@@ -118,6 +118,16 @@
 				collectionField: 'collection_name'
 			};
 		}
+		if (provider === 'elasticsearch') {
+			return {
+				contentField: 'content',
+				vectorField: '',
+				metadataField: 'metadata',
+				documentIdField: 'id',
+				tableName: 'document_chunk',
+				collectionField: 'collection_name'
+			};
+		}
 		return {
 			contentField: 'payload.text',
 			vectorField: '',
@@ -218,6 +228,9 @@
 		if (sourceForm.provider === 'meilisearch') {
 			return 'http://localhost:7700';
 		}
+		if (sourceForm.provider === 'elasticsearch') {
+			return 'http://localhost:9200';
+		}
 		return 'https://qdrant.example.com';
 	};
 
@@ -277,7 +290,10 @@
 		!!sourceForm.endpoint.trim() &&
 		!!sourceForm.sourceName.trim() &&
 		!!sourceForm.contentField.trim() &&
-		(sourceForm.provider === 'qdrant' || sourceForm.provider === 'meilisearch' || !!sourceForm.vectorField.trim()) &&
+		(sourceForm.provider === 'qdrant' ||
+			sourceForm.provider === 'meilisearch' ||
+			sourceForm.provider === 'elasticsearch' ||
+			!!sourceForm.vectorField.trim()) &&
 		(sourceForm.provider !== 'pgvector' ||
 			(!!sourceForm.tableName.trim() && !!sourceForm.collectionField.trim())) &&
 		!!sourceForm.testQuery.trim();
@@ -494,6 +510,7 @@
 										<option value="milvus">Milvus</option>
 										<option value="pgvector">pgvector</option>
 										<option value="meilisearch">Meilisearch</option>
+										<option value="elasticsearch">Elasticsearch</option>
 									</SettingsSelect>
 								</div>
 							</div>
@@ -597,7 +614,12 @@
 							<div class="flex flex-col w-full">
 								<div class="flex justify-between mb-0.5">
 									<label class="text-xs text-gray-500" for="external-source-collection"
-										>{$i18n.t(sourceForm.provider === 'meilisearch' ? 'Index' : 'Collection')}</label
+										>{$i18n.t(
+											sourceForm.provider === 'meilisearch' ||
+												sourceForm.provider === 'elasticsearch'
+												? 'Index'
+												: 'Collection'
+										)}</label
 									>
 								</div>
 								<div class="flex flex-1 items-center">
@@ -606,7 +628,11 @@
 										class="w-full text-sm bg-transparent outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700"
 										bind:value={sourceForm.sourceName}
 										on:input={markUntested}
-										placeholder={sourceForm.provider === 'meilisearch' ? 'movies' : 'research-docs'}
+										placeholder={sourceForm.provider === 'elasticsearch'
+											? 'my-index'
+											: sourceForm.provider === 'meilisearch'
+												? 'movies'
+												: 'research-docs'}
 										required
 									/>
 								</div>
@@ -666,7 +692,8 @@
 										class="w-full text-sm bg-transparent outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700"
 										bind:value={sourceForm.contentField}
 										on:input={markUntested}
-										placeholder={sourceForm.provider === 'meilisearch'
+										placeholder={sourceForm.provider === 'meilisearch' ||
+										sourceForm.provider === 'elasticsearch'
 											? 'content'
 											: sourceForm.provider === 'pgvector'
 												? 'text'
@@ -688,8 +715,14 @@
 										class="w-full text-sm bg-transparent outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700"
 										bind:value={sourceForm.vectorField}
 										on:input={markUntested}
-										placeholder={sourceForm.provider === 'qdrant' || sourceForm.provider === 'meilisearch' ? $i18n.t('Default') : 'vector'}
-										required={sourceForm.provider !== 'qdrant' && sourceForm.provider !== 'meilisearch'}
+										placeholder={sourceForm.provider === 'qdrant' ||
+										sourceForm.provider === 'meilisearch' ||
+										sourceForm.provider === 'elasticsearch'
+											? $i18n.t('Default')
+											: 'vector'}
+										required={sourceForm.provider !== 'qdrant' &&
+											sourceForm.provider !== 'meilisearch' &&
+											sourceForm.provider !== 'elasticsearch'}
 									/>
 								</div>
 							</div>
@@ -710,7 +743,8 @@
 										on:input={markUntested}
 										placeholder={sourceForm.provider === 'pgvector'
 											? 'vmetadata'
-											: sourceForm.provider === 'meilisearch'
+											: sourceForm.provider === 'meilisearch' ||
+												  sourceForm.provider === 'elasticsearch'
 												? 'metadata'
 												: 'payload.metadata'}
 									/>
