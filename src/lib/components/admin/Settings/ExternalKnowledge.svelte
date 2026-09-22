@@ -110,7 +110,7 @@
 		}
 		if (provider === 'meilisearch') {
 			return {
-				contentField: 'text',
+				contentField: 'content',
 				vectorField: '',
 				metadataField: 'metadata',
 				documentIdField: 'id',
@@ -304,8 +304,18 @@
 		});
 
 		if (res?.documents?.length) {
-			testResult = res;
-			toast.success($i18n.t('Test succeeded.'));
+			const hasValidContent = res.documents.some((doc) => doc && doc.trim().length > 0);
+			if (hasValidContent) {
+				testResult = res;
+				toast.success($i18n.t('Test succeeded.'));
+			} else {
+				testResult = null;
+				toast.error(
+					$i18n.t(
+						'Test returned documents, but content was empty. Please verify the content field mapping.'
+					)
+				);
+			}
 		} else if (res) {
 			toast.error($i18n.t('Test returned no results.'));
 		}
@@ -656,7 +666,11 @@
 										class="w-full text-sm bg-transparent outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700"
 										bind:value={sourceForm.contentField}
 										on:input={markUntested}
-										placeholder={sourceForm.provider === 'pgvector' || sourceForm.provider === 'meilisearch' ? 'text' : 'payload.text'}
+										placeholder={sourceForm.provider === 'meilisearch'
+											? 'content'
+											: sourceForm.provider === 'pgvector'
+												? 'text'
+												: 'payload.text'}
 										required
 									/>
 								</div>

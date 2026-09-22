@@ -38,6 +38,19 @@ export const createNewKnowledge = async (
 	return res;
 };
 
+const handleExternalKnowledgeResponse = async (res: Response) => {
+	if (!res.ok) {
+		const errorData = await res.json().catch(async () => ({
+			detail: (await res.text().catch(() => '')) || res.statusText || `HTTP ${res.status}`
+		}));
+		throw errorData;
+	}
+	return res.json();
+};
+
+const extractExternalKnowledgeError = (err: any) =>
+	err?.detail ?? err?.message ?? (typeof err === 'string' ? err : 'An error occurred.');
+
 export const getExternalKnowledgeConnections = async (token: string) => {
 	let error = null;
 
@@ -49,12 +62,9 @@ export const getExternalKnowledgeConnections = async (token: string) => {
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(handleExternalKnowledgeResponse)
 		.catch((err) => {
-			error = err.detail;
+			error = extractExternalKnowledgeError(err);
 			console.error(err);
 			return null;
 		});
@@ -78,12 +88,9 @@ export const createExternalKnowledgeConnection = async (token: string, connectio
 		},
 		body: JSON.stringify(connection)
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(handleExternalKnowledgeResponse)
 		.catch((err) => {
-			error = err.detail;
+			error = extractExternalKnowledgeError(err);
 			console.error(err);
 			return null;
 		});
@@ -111,12 +118,9 @@ export const updateExternalKnowledgeConnection = async (
 		},
 		body: JSON.stringify(connection)
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(handleExternalKnowledgeResponse)
 		.catch((err) => {
-			error = err.detail;
+			error = extractExternalKnowledgeError(err);
 			console.error(err);
 			return null;
 		});
@@ -139,12 +143,9 @@ export const deleteExternalKnowledgeConnection = async (token: string, id: strin
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(handleExternalKnowledgeResponse)
 		.catch((err) => {
-			error = err.detail;
+			error = extractExternalKnowledgeError(err);
 			console.error(err);
 			return null;
 		});
@@ -167,12 +168,9 @@ export const testExternalKnowledgeConnection = async (token: string, id: string)
 			authorization: `Bearer ${token}`
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(handleExternalKnowledgeResponse)
 		.catch((err) => {
-			error = err.detail;
+			error = extractExternalKnowledgeError(err);
 			console.error(err);
 			return null;
 		});
@@ -203,12 +201,9 @@ export const testExternalKnowledgeRetrieval = async (
 			body: JSON.stringify(payload)
 		}
 	)
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(handleExternalKnowledgeResponse)
 		.catch((err) => {
-			error = err.detail;
+			error = extractExternalKnowledgeError(err);
 			console.error(err);
 			return null;
 		});
@@ -232,12 +227,9 @@ export const testExternalKnowledgeSource = async (token: string, payload: object
 		},
 		body: JSON.stringify(payload)
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(handleExternalKnowledgeResponse)
 		.catch((err) => {
-			error = err.detail;
+			error = extractExternalKnowledgeError(err);
 			console.error(err);
 			return null;
 		});
@@ -261,12 +253,9 @@ export const createExternalKnowledgeSource = async (token: string, payload: obje
 		},
 		body: JSON.stringify(payload)
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(handleExternalKnowledgeResponse)
 		.catch((err) => {
-			error = err.detail;
+			error = extractExternalKnowledgeError(err);
 			console.error(err);
 			return null;
 		});
@@ -290,12 +279,9 @@ export const updateExternalKnowledgeSource = async (token: string, id: string, p
 		},
 		body: JSON.stringify(payload)
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(handleExternalKnowledgeResponse)
 		.catch((err) => {
-			error = err.detail;
+			error = extractExternalKnowledgeError(err);
 			console.error(err);
 			return null;
 		});

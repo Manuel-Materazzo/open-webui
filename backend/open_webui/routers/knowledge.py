@@ -819,14 +819,23 @@ async def _get_external_source_test_result(
         created_at=int(time.time()),
         updated_at=int(time.time()),
     )
-    result = await retrieve_external_knowledge_for_connection(
-        request,
-        test_knowledge,
-        connection,
-        [query.strip()],
-        count,
-        user=user,
-    )
+    try:
+        result = await retrieve_external_knowledge_for_connection(
+            request,
+            test_knowledge,
+            connection,
+            [query.strip()],
+            count,
+            user=user,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.error(f'External knowledge test failed: {exc}')
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
     return {
         'documents': result.get('documents', [[]])[0],
         'metadatas': result.get('metadatas', [[]])[0],
@@ -943,8 +952,8 @@ async def create_external_knowledge_source(
         form_data.test_count,
         user,
     )
-    if not test_result.get('documents'):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Test query returned no results.')
+    if not test_result.get('documents') or not any(isinstance(doc, str) and doc.strip() for doc in test_result.get('documents', [])):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Test query returned no results or all document contents were empty.')
 
     form_data.access_grants = await filter_allowed_access_grants(
         await Config.get('user.permissions'),
@@ -1019,8 +1028,8 @@ async def update_external_knowledge_source(
         form_data.test_count,
         user,
     )
-    if not test_result.get('documents'):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Test query returned no results.')
+    if not test_result.get('documents') or not any(isinstance(doc, str) and doc.strip() for doc in test_result.get('documents', [])):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Test query returned no results or all document contents were empty.')
 
     form_data.access_grants = await filter_allowed_access_grants(
         await Config.get('user.permissions'),

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import re
 import time
@@ -34,16 +35,79 @@ def _get_path(data: Any, path: Optional[str], default=None):
 
 
 def _normalize_result(result: dict, mapping: dict, knowledge: KnowledgeModel, distance: Optional[float] = None) -> dict:
-    content = _get_path(result, mapping.get('content_field', 'content'), '')
+    content_field = mapping.get('content_field', 'content')
+    content = _get_path(result, content_field, None)
+
+    # Fallback to common content fields if the configured field was empty or not found
+    if not content or (isinstance(content, str) and not content.strip()):
+        for fallback in (
+            'content',
+            'text',
+            'body',
+            'overview',
+            'description',
+            'page_content',
+            'parts',
+            'data',
+            'payload.text',
+            'data.text',
+        ):
+            if fallback == content_field:
+                continue
+            val = _get_path(result, fallback, None)
+            if val and (not isinstance(val, str) or val.strip()):
+                content = val
+                break
+
     title = _get_path(result, mapping.get('title_field', 'title'), None)
+    if not title:
+        title = _get_path(result, 'name', None) or _get_path(result, 'filename', None)
+
+    if (not content or (isinstance(content, str) and not content.strip())) and title:
+        content = title
+
+    if content is None:
+        content = ''
+    elif not isinstance(content, str):
+        if isinstance(content, list):
+            content = '\n'.join(
+                item if isinstance(item, str)
+                else (item.get('text') or item.get('content') or str(item)) if isinstance(item, dict)
+                else str(item)
+                for item in content
+            )
+        elif isinstance(content, dict):
+            content = content.get('text') or content.get('content') or str(content)
+        else:
+            content = str(content)
+
     source = _get_path(result, mapping.get('source_field', 'source'), None)
+    if not source:
+        source = _get_path(result, 'source_name', None) or _get_path(result, 'origin', None)
+
     url = _get_path(result, mapping.get('url_field', 'url'), None)
+    if not url:
+        url = _get_path(result, 'link', None) or _get_path(result, 'uri', None)
+
     document_id = _get_path(result, mapping.get('document_id_field', 'document_id'), None)
+    if not document_id:
+        document_id = _get_path(result, 'id', None) or _get_path(result, '_id', None)
+
     page = _get_path(result, mapping.get('page_field', 'page'), None)
-    metadata = _get_path(result, mapping.get('metadata_field', 'metadata'), {}) or {}
+    metadata = _get_path(result, mapping.get('metadata_field', 'metadata'), None)
     score = _get_path(result, mapping.get('score_field', 'score'), distance)
 
-    if not isinstance(metadata, dict):
+    if metadata is None:
+        reserved_keys = {
+            content_field,
+            'content', 'text', 'body', 'vector',
+            '_rankingScore', '_formatted', '_matchesPosition', '_federation'
+        }
+        metadata = {
+            k: v for k, v in result.items()
+            if k not in reserved_keys and not isinstance(v, (dict, list))
+        }
+    elif not isinstance(metadata, dict):
         metadata = {'external_metadata': metadata}
 
     source_name = source or title or metadata.get('source') or metadata.get('name') or knowledge.name
@@ -291,6 +355,19 @@ async def _retrieve_pgvector(connection, auth_config, knowledge, query, count, e
     return [_normalize_result(row, mapping, knowledge, distance=row.get('distance')) for row in rows]
 
 
+def _format_meilisearch_error(status: int, error_body: str) -> str:
+    try:
+        data = json.loads(error_body)
+        if isinstance(data, dict):
+            msg = data.get('message')
+            code = data.get('code')
+            if msg:
+                return f"Meilisearch error ({status}): {msg}" + (f" ({code})" if code else "")
+    except Exception:
+        pass
+    return f"Meilisearch error ({status}): {error_body}"
+
+
 async def _retrieve_meilisearch(connection, auth_config, knowledge, query, count, embedding_function) -> list[dict]:
     config = connection.get('config') or {}
     external = (knowledge.meta or {}).get('external', {})
@@ -299,7 +376,7 @@ async def _retrieve_meilisearch(connection, auth_config, knowledge, query, count
     if not index_name:
         raise RuntimeError('Meilisearch index is not configured')
     source_config = _source_config(knowledge)
-    content_field = source_config.get('content_field') or 'text'
+    content_field = source_config.get('content_field') or 'content'
     metadata_field = source_config.get('metadata_field') or 'metadata'
     document_id_field = source_config.get('document_id_field') or 'id'
     score_field = source_config.get('score_field') or '_rankingScore'
@@ -356,10 +433,10 @@ async def _retrieve_meilisearch(connection, auth_config, knowledge, query, count
                 ) as retry_resp:
                     if retry_resp.status != 200:
                         retry_error = await retry_resp.text()
-                        raise RuntimeError(f'Meilisearch error ({retry_resp.status}): {retry_error}')
+                        raise RuntimeError(_format_meilisearch_error(retry_resp.status, retry_error))
                     data = await retry_resp.json()
             else:
-                raise RuntimeError(f'Meilisearch error ({resp.status}): {error_body}')
+                raise RuntimeError(_format_meilisearch_error(resp.status, error_body))
         else:
             data = await resp.json()
 
