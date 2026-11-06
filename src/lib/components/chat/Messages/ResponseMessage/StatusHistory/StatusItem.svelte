@@ -122,6 +122,50 @@
 					{/if}
 				</div>
 			</div>
+		{:else if status?.action === 'server_status' || (status?.action === 'prompt_progress' && (status?.stage || (status?.status && !status?.total)))}
+			<div class="flex flex-col justify-center -space-y-0.5 w-full">
+				<div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 gap-2">
+					<div
+						class="{(done || status?.done) === false
+							? 'shimmer'
+							: ''} text-[0.9375rem] line-clamp-1 text-wrap"
+					>
+						{#if done || status?.done}
+							{#if status?.stage === 'ready'}
+								{$i18n.t('Server ready')}
+							{:else}
+								{status?.description || status?.status || $i18n.t('Server ready')}
+							{/if}
+						{:else}
+							{status?.status || status?.description || (status?.stage ? `${status.stage.charAt(0).toUpperCase() + status.stage.slice(1)}...` : $i18n.t('Waiting for server...'))}
+							{#if status?.percent !== undefined && status?.percent > 0 && status?.percent < 100}
+								{status.percent}%
+							{/if}
+						{/if}
+					</div>
+					{#if status?.time_ms || status?.time_to_pp}
+						<div
+							class="text-xs text-gray-400 dark:text-gray-500 tabular-nums shrink-0"
+							title={$i18n.t('Time to PP')}
+						>
+							{#if !(done || status?.done)}
+								({((status?.time_to_pp ?? status?.time_ms) / 1000).toFixed(1)}s)
+							{:else}
+								<span class="text-gray-400 dark:text-gray-500">{$i18n.t('Time to PP')}:</span>
+								{((status?.time_to_pp ?? status?.time_ms) / 1000).toFixed(1)}s
+							{/if}
+						</div>
+					{/if}
+				</div>
+				{#if !(done || status?.done) && status?.percent !== undefined && status?.percent > 0}
+					<div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1 mt-1 overflow-hidden">
+						<div
+							class="bg-blue-600 dark:bg-blue-500 h-1 rounded-full transition-all duration-150 ease-out"
+							style="width: {Math.min(100, Math.max(0, status?.percent ?? 0))}%"
+						></div>
+					</div>
+				{/if}
+			</div>
 		{:else if status?.action === 'prompt_progress'}
 			<div class="flex flex-col justify-center -space-y-0.5 w-full">
 				<div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 gap-2">
@@ -147,6 +191,9 @@
 									({status.cache} {$i18n.t('cached')})
 								{/if}
 								{$i18n.t('tokens')}
+								{#if status?.time_ms}
+									({(status.time_ms / 1000).toFixed(1)}s)
+								{/if}
 							{:else}
 								{status?.total} {$i18n.t('tokens')}
 								{#if status?.time_ms}

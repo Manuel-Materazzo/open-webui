@@ -4915,6 +4915,10 @@ async def streaming_chat_response_handler(response, ctx):
                     response_tool_calls = []
                     prompt_progress_active = False
                     last_prompt_progress_time = 0.0
+                    server_status_active = False
+                    last_server_status_time = 0.0
+                    last_server_status_text = None
+                    last_server_status_time_ms = 0
 
                     delta_count = 0
                     delta_chunk_size = max(
@@ -5201,7 +5205,72 @@ async def streaming_chat_response_handler(response, ctx):
                                             }
                                         )
 
-                                    if 'prompt_progress' in data:
+                                    stage = data.get('stage')
+                                    server_status = data.get('status')
+                                    has_server_status = bool(
+                                        stage
+                                        or (
+                                            server_status
+                                            and isinstance(server_status, str)
+                                            and not server_status.startswith('{')
+                                        )
+                                    )
+
+                                    if has_server_status:
+                                        raw_pp = data.get('prompt_progress')
+                                        prompt_progress = raw_pp if isinstance(raw_pp, dict) else {}
+                                        total = prompt_progress.get('total', data.get('total', 100 if stage else 0))
+                                        processed = prompt_progress.get('processed', data.get('processed', 0))
+                                        cache = prompt_progress.get('cache', data.get('cache', 0))
+                                        time_ms = prompt_progress.get('time_ms', data.get('time_ms', 0))
+                                        if time_ms:
+                                            last_server_status_time_ms = time_ms
+
+                                        percent = round((processed / total * 100)) if total > 0 else 0
+                                        is_ready = (stage == 'ready') or (
+                                            processed >= total and total > 0 and stage != 'booting'
+                                        )
+                                        done = is_ready
+                                        server_status_active = not done
+
+                                        description = server_status or (
+                                            'Server ready'
+                                            if is_ready
+                                            else (
+                                                f'Starting server ({stage})...'
+                                                if stage
+                                                else 'Starting server...'
+                                            )
+                                        )
+
+                                        effective_time_ms = time_ms or last_server_status_time_ms
+                                        now = time.time()
+                                        if (
+                                            done
+                                            or server_status != last_server_status_text
+                                            or (now - last_server_status_time >= 0.25)
+                                        ):
+                                            last_server_status_time = now
+                                            last_server_status_text = server_status
+                                            await event_emitter(
+                                                {
+                                                    'type': 'status',
+                                                    'data': {
+                                                        'action': 'server_status',
+                                                        'stage': stage,
+                                                        'status': server_status,
+                                                        'description': description,
+                                                        'total': total,
+                                                        'processed': processed,
+                                                        'cache': cache,
+                                                        'time_ms': effective_time_ms,
+                                                        'time_to_pp': effective_time_ms,
+                                                        'percent': percent,
+                                                        'done': done,
+                                                    },
+                                                }
+                                            )
+                                    elif 'prompt_progress' in data:
                                         prompt_progress = data['prompt_progress']
                                         if isinstance(prompt_progress, dict):
                                             total = prompt_progress.get('total', 0)
@@ -5258,11 +5327,28 @@ async def streaming_chat_response_handler(response, ctx):
                                         continue
 
                                     delta = choices[0].get('delta', {})
-                                    if prompt_progress_active and (
+                                    has_delta_content = bool(
                                         delta.get('content')
                                         or delta.get('reasoning_content')
                                         or delta.get('reasoning')
-                                    ):
+                                    )
+                                    if server_status_active and has_delta_content:
+                                        server_status_active = False
+                                        await event_emitter(
+                                            {
+                                                'type': 'status',
+                                                'data': {
+                                                    'action': 'server_status',
+                                                    'stage': 'ready',
+                                                    'description': 'Server ready',
+                                                    'done': True,
+                                                    'time_ms': last_server_status_time_ms,
+                                                    'time_to_pp': last_server_status_time_ms,
+                                                },
+                                            }
+                                        )
+
+                                    if prompt_progress_active and has_delta_content:
                                         prompt_progress_active = False
                                         await event_emitter(
                                             {
@@ -5926,6 +6012,22 @@ async def streaming_chat_response_handler(response, ctx):
 
                         if extracted_tool_calls:
                             tool_calls.append(_split_tool_calls(extracted_tool_calls))
+
+                    if server_status_active:
+                        server_status_active = False
+                        await event_emitter(
+                            {
+                                'type': 'status',
+                                'data': {
+                                    'action': 'server_status',
+                                    'stage': 'ready',
+                                    'description': 'Server ready',
+                                    'done': True,
+                                    'time_ms': last_server_status_time_ms,
+                                    'time_to_pp': last_server_status_time_ms,
+                                },
+                            }
+                        )
 
                     if prompt_progress_active:
                         prompt_progress_active = False
