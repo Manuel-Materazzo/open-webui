@@ -1055,6 +1055,290 @@ async def delete_provider_model(
     return result
 
 
+# Track the last restored slot snapshot: (url_idx, slot_id) -> filename
+_last_restored_slot: dict[tuple[int, int], str] = {}
+
+
+class SlotActionForm(BaseModel):
+    model_id: str | None = None
+    base_model_id: str | None = None
+    url_idx: int | None = None
+    slot_id: int = 0
+    action: str  # "erase", "save", "restore"
+    filename: str | None = None
+
+
+class SlotPrefillAndSaveForm(BaseModel):
+    model_id: str | None = None
+    base_model_id: str | None = None
+    url_idx: int | None = None
+    slot_id: int = 0
+    filename: str
+    system: str | None = None
+    tool_ids: list[str] | None = None
+    tools: list[dict] | None = None
+    dummy_message: str | None = 'ciao'
+
+
+async def resolve_url_idx_for_slot(
+    request: Request,
+    url_idx: int | None = None,
+    model_id: str | None = None,
+    base_model_id: str | None = None,
+    user: UserModel | None = None,
+) -> int:
+    if url_idx is not None and url_idx >= 0:
+        return url_idx
+
+    target_id = base_model_id or model_id
+    if target_id:
+        models = request.app.state.OPENAI_MODELS
+        if not models or target_id not in models:
+            await get_all_models(request, user=user)
+            models = request.app.state.OPENAI_MODELS
+        if target_id in models:
+            return models[target_id].get('urlIdx', 0)
+
+        model_info = await Models.get_model_by_id(target_id)
+        if model_info and model_info.base_model_id:
+            if model_info.base_model_id in models:
+                return models[model_info.base_model_id].get('urlIdx', 0)
+
+    return 0
+
+
+async def get_llamacpp_connection(url_idx: int) -> tuple[str, str, str, dict]:
+    """
+    Returns (root_url, base_url, key, api_config) for llama.cpp slot operations.
+    """
+    if not await Config.get('openai.enable'):
+        raise HTTPException(status_code=503, detail='OpenAI API is disabled')
+
+    try:
+        url, key, api_config = await get_openai_connection(url_idx)
+    except IndexError:
+        raise HTTPException(status_code=404, detail='Connection not found')
+
+    root_url = get_model_management_root_url(url, 'llama.cpp')
+    return root_url, url, key, api_config
+
+
+async def execute_slot_action(
+    request: Request,
+    url_idx: int,
+    slot_id: int,
+    action: str,
+    filename: str | None = None,
+    user: UserModel | None = None,
+) -> dict:
+    if action not in ('erase', 'save', 'restore'):
+        raise HTTPException(status_code=400, detail=f'Invalid slot action: {action}')
+
+    root_url, _, key, api_config = await get_llamacpp_connection(url_idx)
+    headers, cookies = await get_headers_and_cookies(request, root_url, key, api_config, user=user)
+
+    target_url = f'{root_url}/slots/{slot_id}?action={action}'
+    payload = None
+    if action in ('save', 'restore'):
+        if not filename:
+            raise HTTPException(status_code=400, detail=f'Filename is required for slot {action}')
+        payload = JSONCodec.dumps({'filename': filename})
+
+    session = await get_session()
+    try:
+        async with session.post(
+            target_url,
+            data=payload,
+            headers=headers,
+            cookies=cookies,
+            ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            timeout=aiohttp.ClientTimeout(total=60),
+        ) as resp:
+            text = await resp.text()
+            try:
+                data = JSONCodec.loads(text)
+            except Exception:
+                data = {'response': text}
+
+            if resp.status >= 400:
+                err_msg = text
+                if isinstance(data, dict):
+                    err_msg = data.get('error', {}).get('message') or data.get('message') or text
+                raise HTTPException(status_code=resp.status, detail=f'llama.cpp slot {action} error: {err_msg}')
+
+            if action in ('restore', 'save') and filename:
+                _last_restored_slot[(url_idx, slot_id)] = filename
+            elif action == 'erase':
+                _last_restored_slot.pop((url_idx, slot_id), None)
+
+            return data if isinstance(data, dict) else {'result': data}
+    except aiohttp.ClientError as e:
+        raise HTTPException(status_code=502, detail=f'Failed to connect to llama.cpp at {root_url}: {e}')
+
+
+async def prefill_and_save_slot(
+    request: Request,
+    form_data: SlotPrefillAndSaveForm,
+    user: UserModel,
+) -> dict:
+    url_idx = await resolve_url_idx_for_slot(
+        request,
+        url_idx=form_data.url_idx,
+        model_id=form_data.model_id,
+        base_model_id=form_data.base_model_id,
+        user=user,
+    )
+    slot_id = form_data.slot_id
+    filename = form_data.filename.strip()
+    if not filename:
+        raise HTTPException(status_code=400, detail='Filename is required')
+
+    # 1. Erase slot
+    await execute_slot_action(request, url_idx, slot_id, 'erase', user=user)
+
+    # 2. Resolve model name for completion
+    _, base_url, key, api_config = await get_llamacpp_connection(url_idx)
+    target_model = form_data.base_model_id or form_data.model_id or ''
+    target_model = strip_provider_model_prefix(target_model, api_config.get('prefix_id'))
+
+    if not target_model:
+        models = request.app.state.OPENAI_MODELS
+        for m_id, m_val in (models or {}).items():
+            if m_val.get('urlIdx') == url_idx:
+                target_model = strip_provider_model_prefix(m_id, api_config.get('prefix_id'))
+                break
+
+    # Resolve tools
+    tools_specs = []
+    if form_data.tools:
+        tools_specs = form_data.tools
+    elif form_data.tool_ids:
+        from open_webui.models.tools import Tools
+
+        db_tools = await Tools.get_tools_by_ids(form_data.tool_ids)
+        for t in db_tools.values():
+            if t.specs:
+                for s in t.specs:
+                    tools_specs.append({'type': 'function', 'function': s})
+
+    # Prepare chat completion messages
+    messages = []
+    if form_data.system:
+        messages.append({'role': 'system', 'content': form_data.system})
+    messages.append({'role': 'user', 'content': form_data.dummy_message or 'ciao'})
+
+    completion_payload = {
+        'model': target_model or 'default',
+        'messages': messages,
+        'max_tokens': 1,
+        'cache_prompt': True,
+        'stream': False,
+    }
+    if tools_specs:
+        completion_payload['tools'] = tools_specs
+
+    # Send completion to llama.cpp
+    chat_url = f"{base_url.rstrip('/')}/chat/completions"
+    headers, cookies = await get_headers_and_cookies(request, base_url, key, api_config, user=user)
+
+    session = await get_session()
+    try:
+        async with session.post(
+            chat_url,
+            data=JSONCodec.dumps(completion_payload),
+            headers=headers,
+            cookies=cookies,
+            ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            timeout=aiohttp.ClientTimeout(total=120),
+        ) as resp:
+            text = await resp.text()
+            if resp.status >= 400:
+                raise HTTPException(status_code=resp.status, detail=f'llama.cpp prefill completion error: {text}')
+            try:
+                prefill_res = JSONCodec.loads(text)
+            except Exception:
+                prefill_res = {'response': text}
+    except aiohttp.ClientError as e:
+        raise HTTPException(status_code=502, detail=f'Failed to connect to llama.cpp completion endpoint at {chat_url}: {e}')
+
+    # 3. Save slot
+    save_res = await execute_slot_action(request, url_idx, slot_id, 'save', filename=filename, user=user)
+
+    return {
+        'status': 'ok',
+        'slot_id': slot_id,
+        'filename': filename,
+        'prefill': prefill_res,
+        'save': save_res,
+    }
+
+
+@router.post('/slots/action')
+async def perform_slot_action(
+    request: Request,
+    form_data: SlotActionForm,
+    user=Depends(get_verified_user),
+):
+    url_idx = await resolve_url_idx_for_slot(
+        request,
+        url_idx=form_data.url_idx,
+        model_id=form_data.model_id,
+        base_model_id=form_data.base_model_id,
+        user=user,
+    )
+    return await execute_slot_action(
+        request,
+        url_idx=url_idx,
+        slot_id=form_data.slot_id,
+        action=form_data.action,
+        filename=form_data.filename,
+        user=user,
+    )
+
+
+@router.post('/slots/prefill-and-save')
+async def prefill_and_save_slot_endpoint(
+    request: Request,
+    form_data: SlotPrefillAndSaveForm,
+    user=Depends(get_verified_user),
+):
+    return await prefill_and_save_slot(request, form_data, user)
+
+
+@router.get('/slots')
+async def get_llama_slots(
+    request: Request,
+    url_idx: int | None = None,
+    model_id: str | None = None,
+    user=Depends(get_verified_user),
+):
+    resolved_idx = await resolve_url_idx_for_slot(
+        request,
+        url_idx=url_idx,
+        model_id=model_id,
+        user=user,
+    )
+    root_url, _, key, api_config = await get_llamacpp_connection(resolved_idx)
+    headers, cookies = await get_headers_and_cookies(request, root_url, key, api_config, user=user)
+
+    session = await get_session()
+    try:
+        async with session.get(
+            f'{root_url}/slots',
+            headers=headers,
+            cookies=cookies,
+            ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as resp:
+            text = await resp.text()
+            try:
+                return JSONCodec.loads(text)
+            except Exception:
+                return {'response': text}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f'Failed to get slots from {root_url}: {e}')
+
+
 class ConnectionVerificationForm(BaseModel):
     url: str
     key: str
@@ -1530,6 +1814,42 @@ async def generate_chat_completion(
         )
 
     url, key, api_config = await get_openai_connection(idx)
+
+    # Auto-restore llama.cpp slot if configured for this workspace model
+    if model_info and model_info.meta and isinstance(model_info.meta, dict):
+        slot_meta = model_info.meta.get('slot')
+        if (
+            isinstance(slot_meta, dict)
+            and slot_meta.get('enabled', True)
+            and slot_meta.get('auto_restore', True)
+            and slot_meta.get('filename')
+        ):
+            slot_id = int(slot_meta.get('slot_id', 0))
+            slot_filename = slot_meta.get('filename', '').strip()
+            if slot_filename and _last_restored_slot.get((idx, slot_id)) != slot_filename:
+                try:
+                    await execute_slot_action(
+                        request,
+                        url_idx=idx,
+                        slot_id=slot_id,
+                        action='restore',
+                        filename=slot_filename,
+                        user=user,
+                    )
+                    log.info(
+                        'Auto-restored slot %d with filename %s for model %s',
+                        slot_id,
+                        slot_filename,
+                        model_id,
+                    )
+                except Exception as e:
+                    log.warning(
+                        'Failed to auto-restore slot %d with filename %s for model %s: %s',
+                        slot_id,
+                        slot_filename,
+                        model_id,
+                        e,
+                    )
 
     prefix_id = api_config.get('prefix_id', None)
     payload['model'] = strip_provider_model_prefix(payload['model'], prefix_id)

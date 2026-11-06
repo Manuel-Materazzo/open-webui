@@ -29,6 +29,7 @@
 	import DefaultFeatures from './DefaultFeatures.svelte';
 	import BuiltinTools from './BuiltinTools.svelte';
 	import PromptSuggestions from './PromptSuggestions.svelte';
+	import SlotConfig from './SlotConfig.svelte';
 	import TerminalSelector from './TerminalSelector.svelte';
 	import TTSVoiceInput from './TTSVoiceInput.svelte';
 	import AccessControlModal from '../common/AccessControlModal.svelte';
@@ -114,6 +115,12 @@
 	let accessGrants = [];
 	let terminalId = '';
 	let tts = { voice: '' };
+	let slotConfig = {
+		enabled: false,
+		slot_id: 0,
+		filename: '',
+		auto_restore: true
+	};
 	export let suggestionTags: { name: string }[] = [];
 	let voices: { id: string; name?: string }[] = [];
 
@@ -356,6 +363,19 @@
 			}
 		}
 
+		if (slotConfig.enabled) {
+			info.meta.slot = {
+				enabled: true,
+				slot_id: Number(slotConfig.slot_id) || 0,
+				filename: slotConfig.filename?.trim() || `${id || 'model'}.bin`,
+				auto_restore: slotConfig.auto_restore ?? true
+			};
+		} else {
+			if (info.meta.slot) {
+				delete info.meta.slot;
+			}
+		}
+
 		info.params.system = system.trim() === '' ? null : system;
 		info.params.stop = params.stop
 			? (typeof params.stop === 'string' ? params.stop.split(',') : params.stop).filter((s) =>
@@ -467,6 +487,15 @@
 			builtinTools = model?.meta?.builtinTools ?? builtinTools;
 			terminalId = model?.meta?.terminalId ?? '';
 			tts = { voice: model?.meta?.tts?.voice ?? '' };
+
+			if (model?.meta?.slot) {
+				slotConfig = {
+					enabled: model.meta.slot.enabled ?? true,
+					slot_id: model.meta.slot.slot_id ?? 0,
+					filename: model.meta.slot.filename ?? '',
+					auto_restore: model.meta.slot.auto_restore ?? true
+				};
+			}
 
 			accessGrants = model?.access_grants ?? [];
 
@@ -912,6 +941,15 @@
 								<PromptSuggestions bind:promptSuggestions={info.meta.suggestion_prompts} />
 							{/if}
 						</section>
+
+						<SlotConfig
+							bind:slot={slotConfig}
+							{system}
+							{toolIds}
+							baseModelId={info.base_model_id}
+							modelId={id}
+							modelName={name}
+						/>
 
 						<div class="my-3">
 							<Knowledge bind:selectedItems={knowledge} />

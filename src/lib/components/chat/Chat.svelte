@@ -81,7 +81,7 @@
 		updateChatById,
 		updateChatFolderIdById
 	} from '$lib/apis/chats';
-	import { generateOpenAIChatCompletion } from '$lib/apis/openai';
+	import { executeSlotAction, generateOpenAIChatCompletion } from '$lib/apis/openai';
 	import { processUrl, processWebSearch } from '$lib/apis/retrieval';
 	import {
 		getAndUpdateUserLocation,
@@ -179,6 +179,40 @@
 		selectedModelIds = [atSelectedModel.id];
 	} else {
 		selectedModelIds = selectedModels;
+	}
+
+	let lastAutoRestoredSlotKey = '';
+	const autoRestoreSlotForModel = async (model: Model) => {
+		const slot = model?.info?.meta?.slot;
+		if (slot?.enabled && slot?.auto_restore && slot?.filename) {
+			const key = `${model.id}:${slot.slot_id ?? 0}:${slot.filename}`;
+			if (key === lastAutoRestoredSlotKey) return;
+			lastAutoRestoredSlotKey = key;
+
+			try {
+				await executeSlotAction(localStorage.token, {
+					model_id: model.id,
+					base_model_id: (model as any)?.base_model_id,
+					slot_id: Number(slot.slot_id) || 0,
+					action: 'restore',
+					filename: slot.filename
+				});
+				console.log(
+					`[llama.cpp slot] Auto-restored slot ${slot.slot_id ?? 0} with ${slot.filename} for model ${model.name || model.id}`
+				);
+			} catch (err) {
+				console.warn('[llama.cpp slot] Failed to auto-restore slot:', err);
+			}
+		}
+	};
+
+	$: if (selectedModelIds && selectedModelIds.length > 0 && $models.length > 0) {
+		for (const mId of selectedModelIds) {
+			const m = $models.find((item) => item.id === mId);
+			if (m) {
+				autoRestoreSlotForModel(m);
+			}
+		}
 	}
 	let serverContextUsage = null;
 	let contextUsage = null;

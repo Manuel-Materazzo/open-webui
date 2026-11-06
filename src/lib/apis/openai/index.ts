@@ -481,3 +481,119 @@ export const synthesizeOpenAISpeech = async (
 
 	return res;
 };
+
+export const executeSlotAction = async (
+	token: string = '',
+	payload: {
+		model_id?: string;
+		base_model_id?: string;
+		url_idx?: number;
+		slot_id?: number;
+		action: string;
+		filename?: string;
+	}
+) => {
+	let error = null;
+
+	const res = await fetch(`${OPENAI_API_BASE_URL}/slots/action`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			...(token && { authorization: `Bearer ${token}` })
+		},
+		body: JSON.stringify(payload)
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = getErrorMessage(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const prefillAndSaveSlot = async (
+	token: string = '',
+	payload: {
+		model_id?: string;
+		base_model_id?: string;
+		url_idx?: number;
+		slot_id?: number;
+		filename: string;
+		system?: string;
+		tool_ids?: string[];
+		tools?: any[];
+		dummy_message?: string;
+	}
+) => {
+	let error = null;
+
+	const res = await fetch(`${OPENAI_API_BASE_URL}/slots/prefill-and-save`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			...(token && { authorization: `Bearer ${token}` })
+		},
+		body: JSON.stringify(payload)
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = getErrorMessage(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const getLlamaSlots = async (
+	token: string = '',
+	model_id?: string,
+	url_idx?: number
+) => {
+	let error = null;
+	const params = new URLSearchParams();
+	if (model_id) params.append('model_id', model_id);
+	if (url_idx !== undefined && url_idx !== null) params.append('url_idx', url_idx.toString());
+
+	const res = await fetch(`${OPENAI_API_BASE_URL}/slots?${params.toString()}`, {
+		method: 'GET',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			...(token && { authorization: `Bearer ${token}` })
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = getErrorMessage(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
