@@ -1077,6 +1077,9 @@ class SlotPrefillAndSaveForm(BaseModel):
     system: str | None = None
     tool_ids: list[str] | None = None
     tools: list[dict] | None = None
+    capabilities: dict | None = None
+    builtin_tools: dict | None = None
+    default_feature_ids: list[str] | None = None
     dummy_message: str | None = 'ciao'
 
 
@@ -1163,8 +1166,17 @@ async def execute_slot_action(
             if resp.status >= 400:
                 err_msg = text
                 if isinstance(data, dict):
-                    err_msg = data.get('error', {}).get('message') or data.get('message') or text
-                raise HTTPException(status_code=resp.status, detail=f'llama.cpp slot {action} error: {err_msg}')
+                    err_val = data.get('error')
+                    if isinstance(err_val, dict):
+                        err_msg = err_val.get('message') or text
+                    elif isinstance(err_val, str):
+                        err_msg = err_val
+                    else:
+                        err_msg = data.get('message') or data.get('detail') or text
+                raise HTTPException(
+                    status_code=resp.status,
+                    detail=f'llama.cpp slot {action} error ({target_url}): {err_msg}',
+                )
 
             if action in ('restore', 'save') and filename:
                 _last_restored_slot[(url_idx, slot_id)] = filename
@@ -1193,8 +1205,14 @@ async def prefill_and_save_slot(
     if not filename:
         raise HTTPException(status_code=400, detail='Filename is required')
 
-    # 1. Erase slot
-    await execute_slot_action(request, url_idx, slot_id, 'erase', user=user)
+    # 1. Erase slot (ignore 404 if slot does not exist / is already empty)
+    try:
+        await execute_slot_action(request, url_idx, slot_id, 'erase', user=user)
+    except HTTPException as e:
+        if e.status_code == 404:
+            log.warning('Slot %d erase returned 404 (continuing prefill): %s', slot_id, e.detail)
+        else:
+            raise
 
     # 2. Resolve model name for completion
     _, base_url, key, api_config = await get_llamacpp_connection(url_idx)
@@ -1208,18 +1226,60 @@ async def prefill_and_save_slot(
                 target_model = strip_provider_model_prefix(m_id, api_config.get('prefix_id'))
                 break
 
-    # Resolve tools
+    # Resolve custom & builtin tools
     tools_specs = []
+    seen_tool_names: set[str] = set()
     if form_data.tools:
-        tools_specs = form_data.tools
-    elif form_data.tool_ids:
-        from open_webui.models.tools import Tools
+        tools_specs = list(form_data.tools)
+        for t in tools_specs:
+            fn = t.get('function') if isinstance(t, dict) else None
+            if isinstance(fn, dict) and fn.get('name'):
+                seen_tool_names.add(fn['name'])
+    else:
+        if form_data.tool_ids:
+            from open_webui.models.tools import Tools
 
-        db_tools = await Tools.get_tools_by_ids(form_data.tool_ids)
-        for t in db_tools.values():
-            if t.specs:
-                for s in t.specs:
-                    tools_specs.append({'type': 'function', 'function': s})
+            db_tool_ids = [tid for tid in form_data.tool_ids if not tid.startswith('server:')]
+            if db_tool_ids:
+                db_tools = await Tools.get_tools_by_ids(db_tool_ids)
+                for t in db_tools.values():
+                    if t.specs:
+                        for s in t.specs:
+                            name = s.get('name')
+                            if name and name not in seen_tool_names:
+                                seen_tool_names.add(name)
+                                tools_specs.append({'type': 'function', 'function': s})
+
+        capabilities = form_data.capabilities if form_data.capabilities is not None else {'builtin_tools': True}
+        if capabilities.get('builtin_tools', True):
+            try:
+                from open_webui.utils.tools import get_builtin_tools
+
+                model_dict = {
+                    'id': form_data.model_id or form_data.base_model_id or '',
+                    'info': {
+                        'meta': {
+                            'capabilities': capabilities,
+                            'builtinTools': form_data.builtin_tools or {},
+                        }
+                    },
+                }
+                features_dict = {fid: True for fid in (form_data.default_feature_ids or [])}
+                builtin_dict = await get_builtin_tools(
+                    request,
+                    {'__user__': user.model_dump()},
+                    features=features_dict,
+                    model=model_dict,
+                )
+                for t_val in builtin_dict.values():
+                    spec = t_val.get('spec') if isinstance(t_val, dict) else None
+                    if isinstance(spec, dict):
+                        name = spec.get('name')
+                        if name and name not in seen_tool_names:
+                            seen_tool_names.add(name)
+                            tools_specs.append({'type': 'function', 'function': spec})
+            except Exception as e:
+                log.warning('Failed to resolve builtin tools for slot prefill: %s', e)
 
     # Prepare chat completion messages
     messages = []
@@ -1268,6 +1328,7 @@ async def prefill_and_save_slot(
         'status': 'ok',
         'slot_id': slot_id,
         'filename': filename,
+        'tools_count': len(tools_specs),
         'prefill': prefill_res,
         'save': save_res,
     }

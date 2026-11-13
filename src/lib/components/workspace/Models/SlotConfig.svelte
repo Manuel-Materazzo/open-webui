@@ -21,9 +21,36 @@
 
 	export let system: string = '';
 	export let toolIds: string[] = [];
+	export let capabilities: Record<string, any> = {};
+	export let builtinTools: Record<string, boolean> = {};
+	export let defaultFeatureIds: string[] = [];
 	export let baseModelId: string | null = null;
 	export let modelId: string = '';
 	export let modelName: string = '';
+
+	const BUILTIN_TOOL_KEYS = [
+		'time',
+		'user_input',
+		'memory',
+		'chats',
+		'notes',
+		'knowledge',
+		'files',
+		'channels',
+		'notifications',
+		'web_search',
+		'image_generation',
+		'code_interpreter',
+		'tasks',
+		'automations',
+		'calendar',
+		'subagents'
+	];
+
+	$: enabledBuiltinCount =
+		capabilities?.builtin_tools !== false
+			? BUILTIN_TOOL_KEYS.filter((k) => builtinTools?.[k] !== false).length
+			: 0;
 
 	let loadingAction: string | null = null;
 	let lastStatus: string | null = null;
@@ -57,11 +84,15 @@
 				slot_id: Number(slot.slot_id) || 0,
 				filename: filename,
 				system: system || undefined,
-				tool_ids: toolIds.length > 0 ? toolIds : undefined
+				tool_ids: toolIds.length > 0 ? toolIds : undefined,
+				capabilities,
+				builtin_tools: builtinTools,
+				default_feature_ids: defaultFeatureIds.length > 0 ? defaultFeatureIds : undefined
 			});
 
 			slot.filename = filename;
-			lastStatus = `Saved (${filename})`;
+			const toolsInfo = res?.tools_count !== undefined ? ` · ${res.tools_count} tools` : '';
+			lastStatus = `Saved (${filename}${toolsInfo})`;
 			toast.success(
 				$i18n.t('Slot {{slot}} prefilled and saved to {{filename}} successfully!', {
 					slot: Number(slot.slot_id) || 0,
@@ -221,18 +252,23 @@
 			</div>
 
 			<div class="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
-				<div class="flex items-center gap-1.5 text-[0.6875rem] text-gray-400 dark:text-gray-500">
-					<span>{$i18n.t('Payload:')}</span>
-					<span class="rounded bg-gray-200/60 px-1.5 py-0.5 font-mono dark:bg-gray-750">
+				<div class="flex flex-wrap items-center gap-1.5 text-[0.6875rem] text-gray-600 dark:text-gray-300">
+					<span class="font-medium">{$i18n.t('Payload:')}</span>
+					<span class="rounded-md border border-gray-300/70 bg-gray-200/80 px-2 py-0.5 font-mono font-medium text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
 						{system ? `${system.length} chars prompt` : 'No prompt'}
 					</span>
-					<span class="rounded bg-gray-200/60 px-1.5 py-0.5 font-mono dark:bg-gray-750">
-						{toolIds.length > 0 ? `${toolIds.length} tools` : '0 tools'}
+					<span class="rounded-md border border-gray-300/70 bg-gray-200/80 px-2 py-0.5 font-mono font-medium text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+						{toolIds.length} custom {toolIds.length === 1 ? 'tool' : 'tools'}
+					</span>
+					<span class="rounded-md border border-gray-300/70 bg-gray-200/80 px-2 py-0.5 font-mono font-medium text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+						{capabilities?.builtin_tools !== false
+							? `${enabledBuiltinCount} builtin`
+							: 'Builtin off'}
 					</span>
 				</div>
 
 				{#if lastStatus}
-					<div class="ml-auto text-[0.6875rem] text-emerald-600 dark:text-emerald-400">
+					<div class="ml-auto text-[0.6875rem] font-medium text-emerald-600 dark:text-emerald-400">
 						✓ {lastStatus}
 					</div>
 				{/if}

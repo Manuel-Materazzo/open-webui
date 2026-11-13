@@ -946,6 +946,9 @@
 							bind:slot={slotConfig}
 							{system}
 							{toolIds}
+							{capabilities}
+							{builtinTools}
+							{defaultFeatureIds}
 							baseModelId={info.base_model_id}
 							modelId={id}
 							modelName={name}

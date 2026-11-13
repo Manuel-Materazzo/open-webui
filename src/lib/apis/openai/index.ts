@@ -532,6 +532,9 @@ export const prefillAndSaveSlot = async (
 		system?: string;
 		tool_ids?: string[];
 		tools?: any[];
+		capabilities?: Record<string, any>;
+		builtin_tools?: Record<string, boolean>;
+		default_feature_ids?: string[];
 		dummy_message?: string;
 	}
 ) => {
