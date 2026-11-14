@@ -1137,55 +1137,71 @@ async def execute_slot_action(
     if action not in ('erase', 'save', 'restore'):
         raise HTTPException(status_code=400, detail=f'Invalid slot action: {action}')
 
-    root_url, _, key, api_config = await get_llamacpp_connection(url_idx)
+    root_url, base_url, key, api_config = await get_llamacpp_connection(url_idx)
     headers, cookies = await get_headers_and_cookies(request, root_url, key, api_config, user=user)
 
-    target_url = f'{root_url}/slots/{slot_id}?action={action}'
     payload = None
     if action in ('save', 'restore'):
         if not filename:
             raise HTTPException(status_code=400, detail=f'Filename is required for slot {action}')
         payload = JSONCodec.dumps({'filename': filename})
 
+    candidate_urls = [f'{root_url.rstrip("/")}/slots/{slot_id}?action={action}']
+    base_trimmed = base_url.rstrip('/')
+    if base_trimmed != root_url.rstrip('/'):
+        candidate_urls.append(f'{base_trimmed}/slots/{slot_id}?action={action}')
+
     session = await get_session()
-    try:
-        async with session.post(
-            target_url,
-            data=payload,
-            headers=headers,
-            cookies=cookies,
-            ssl=AIOHTTP_CLIENT_SESSION_SSL,
-            timeout=aiohttp.ClientTimeout(total=60),
-        ) as resp:
-            text = await resp.text()
-            try:
-                data = JSONCodec.loads(text)
-            except Exception:
-                data = {'response': text}
+    last_error: HTTPException | None = None
+    for idx_url, target_url in enumerate(candidate_urls):
+        try:
+            async with session.post(
+                target_url,
+                data=payload,
+                headers=headers,
+                cookies=cookies,
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                timeout=aiohttp.ClientTimeout(total=60),
+            ) as resp:
+                text = await resp.text()
+                try:
+                    data = JSONCodec.loads(text)
+                except Exception:
+                    data = {'response': text}
 
-            if resp.status >= 400:
-                err_msg = text
-                if isinstance(data, dict):
-                    err_val = data.get('error')
-                    if isinstance(err_val, dict):
-                        err_msg = err_val.get('message') or text
-                    elif isinstance(err_val, str):
-                        err_msg = err_val
-                    else:
-                        err_msg = data.get('message') or data.get('detail') or text
-                raise HTTPException(
-                    status_code=resp.status,
-                    detail=f'llama.cpp slot {action} error ({target_url}): {err_msg}',
-                )
+                if resp.status == 404 and idx_url < len(candidate_urls) - 1:
+                    log.debug('Slot endpoint %s returned 404, trying fallback URL', target_url)
+                    continue
 
-            if action in ('restore', 'save') and filename:
-                _last_restored_slot[(url_idx, slot_id)] = filename
-            elif action == 'erase':
-                _last_restored_slot.pop((url_idx, slot_id), None)
+                if resp.status >= 400:
+                    err_msg = text
+                    if isinstance(data, dict):
+                        err_val = data.get('error')
+                        if isinstance(err_val, dict):
+                            err_msg = err_val.get('message') or text
+                        elif isinstance(err_val, str):
+                            err_msg = err_val
+                        else:
+                            err_msg = data.get('message') or data.get('detail') or text
+                    raise HTTPException(
+                        status_code=resp.status,
+                        detail=f'llama.cpp slot {action} error ({target_url}): {err_msg}',
+                    )
 
-            return data if isinstance(data, dict) else {'result': data}
-    except aiohttp.ClientError as e:
-        raise HTTPException(status_code=502, detail=f'Failed to connect to llama.cpp at {root_url}: {e}')
+                if action in ('restore', 'save') and filename:
+                    _last_restored_slot[(url_idx, slot_id)] = filename
+                elif action == 'erase':
+                    _last_restored_slot.pop((url_idx, slot_id), None)
+
+                return data if isinstance(data, dict) else {'result': data}
+        except aiohttp.ClientError as e:
+            last_error = HTTPException(status_code=502, detail=f'Failed to connect to llama.cpp at {target_url}: {e}')
+            if idx_url == len(candidate_urls) - 1:
+                raise last_error
+
+    if last_error:
+        raise last_error
+    raise HTTPException(status_code=404, detail=f'llama.cpp slot {action} endpoint not found')
 
 
 async def prefill_and_save_slot(
@@ -1292,6 +1308,7 @@ async def prefill_and_save_slot(
         'messages': messages,
         'max_tokens': 1,
         'cache_prompt': True,
+        'id_slot': slot_id,
         'stream': False,
     }
     if tools_specs:
@@ -1379,23 +1396,31 @@ async def get_llama_slots(
         model_id=model_id,
         user=user,
     )
-    root_url, _, key, api_config = await get_llamacpp_connection(resolved_idx)
+    root_url, base_url, key, api_config = await get_llamacpp_connection(resolved_idx)
     headers, cookies = await get_headers_and_cookies(request, root_url, key, api_config, user=user)
+
+    candidate_urls = [f'{root_url.rstrip("/")}/slots']
+    base_trimmed = base_url.rstrip('/')
+    if base_trimmed != root_url.rstrip('/'):
+        candidate_urls.append(f'{base_trimmed}/slots')
 
     session = await get_session()
     try:
-        async with session.get(
-            f'{root_url}/slots',
-            headers=headers,
-            cookies=cookies,
-            ssl=AIOHTTP_CLIENT_SESSION_SSL,
-            timeout=aiohttp.ClientTimeout(total=10),
-        ) as resp:
-            text = await resp.text()
-            try:
-                return JSONCodec.loads(text)
-            except Exception:
-                return {'response': text}
+        for idx_url, target_url in enumerate(candidate_urls):
+            async with session.get(
+                target_url,
+                headers=headers,
+                cookies=cookies,
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status == 404 and idx_url < len(candidate_urls) - 1:
+                    continue
+                text = await resp.text()
+                try:
+                    return JSONCodec.loads(text)
+                except Exception:
+                    return {'response': text}
     except Exception as e:
         raise HTTPException(status_code=502, detail=f'Failed to get slots from {root_url}: {e}')
 
@@ -1879,38 +1904,36 @@ async def generate_chat_completion(
     # Auto-restore llama.cpp slot if configured for this workspace model
     if model_info and model_info.meta and isinstance(model_info.meta, dict):
         slot_meta = model_info.meta.get('slot')
-        if (
-            isinstance(slot_meta, dict)
-            and slot_meta.get('enabled', True)
-            and slot_meta.get('auto_restore', True)
-            and slot_meta.get('filename')
-        ):
+        if isinstance(slot_meta, dict) and slot_meta.get('enabled', True):
             slot_id = int(slot_meta.get('slot_id', 0))
-            slot_filename = slot_meta.get('filename', '').strip()
-            if slot_filename and _last_restored_slot.get((idx, slot_id)) != slot_filename:
-                try:
-                    await execute_slot_action(
-                        request,
-                        url_idx=idx,
-                        slot_id=slot_id,
-                        action='restore',
-                        filename=slot_filename,
-                        user=user,
-                    )
-                    log.info(
-                        'Auto-restored slot %d with filename %s for model %s',
-                        slot_id,
-                        slot_filename,
-                        model_id,
-                    )
-                except Exception as e:
-                    log.warning(
-                        'Failed to auto-restore slot %d with filename %s for model %s: %s',
-                        slot_id,
-                        slot_filename,
-                        model_id,
-                        e,
-                    )
+            if 'id_slot' not in payload:
+                payload['id_slot'] = slot_id
+            if slot_meta.get('auto_restore', True) and slot_meta.get('filename'):
+                slot_filename = slot_meta.get('filename', '').strip()
+                if slot_filename and _last_restored_slot.get((idx, slot_id)) != slot_filename:
+                    try:
+                        await execute_slot_action(
+                            request,
+                            url_idx=idx,
+                            slot_id=slot_id,
+                            action='restore',
+                            filename=slot_filename,
+                            user=user,
+                        )
+                        log.info(
+                            'Auto-restored slot %d with filename %s for model %s',
+                            slot_id,
+                            slot_filename,
+                            model_id,
+                        )
+                    except Exception as e:
+                        log.warning(
+                            'Failed to auto-restore slot %d with filename %s for model %s: %s',
+                            slot_id,
+                            slot_filename,
+                            model_id,
+                            e,
+                        )
 
     prefix_id = api_config.get('prefix_id', None)
     payload['model'] = strip_provider_model_prefix(payload['model'], prefix_id)
