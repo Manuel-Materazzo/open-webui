@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 import logging
 import re
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import quote, urlparse
 
 import aiofiles
@@ -1064,7 +1064,7 @@ class SlotActionForm(BaseModel):
     base_model_id: str | None = None
     url_idx: int | None = None
     slot_id: int = 0
-    action: str  # "erase", "save", "restore"
+    action: str  # "erase", "save", "restore", "ensure"
     filename: str | None = None
 
 
@@ -1075,7 +1075,14 @@ class SlotPrefillAndSaveForm(BaseModel):
     slot_id: int = 0
     filename: str
     system: str | None = None
+    params: dict | None = None
     tool_ids: list[str] | None = None
+    skill_ids: list[str] | None = None
+    filter_ids: list[str] | None = None
+    terminal_id: str | None = None
+    knowledge: list[Any] | None = None
+    features: dict | None = None
+    variables: dict | None = None
     tools: list[dict] | None = None
     capabilities: dict | None = None
     builtin_tools: dict | None = None
@@ -1126,6 +1133,107 @@ async def get_llamacpp_connection(url_idx: int) -> tuple[str, str, str, dict]:
     return root_url, url, key, api_config
 
 
+async def fetch_llama_slots(
+    request: Request,
+    url_idx: int,
+    user: UserModel | None = None,
+) -> Any:
+    root_url, base_url, key, api_config = await get_llamacpp_connection(url_idx)
+    headers, cookies = await get_headers_and_cookies(request, root_url, key, api_config, user=user)
+
+    candidate_urls = [f'{root_url.rstrip("/")}/slots']
+    base_trimmed = base_url.rstrip('/')
+    if base_trimmed != root_url.rstrip('/'):
+        candidate_urls.append(f'{base_trimmed}/slots')
+
+    session = await get_session()
+    try:
+        for idx_url, target_url in enumerate(candidate_urls):
+            async with session.get(
+                target_url,
+                headers=headers,
+                cookies=cookies,
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                timeout=get_client_timeout(stream=False),
+            ) as resp:
+                if resp.status == 404 and idx_url < len(candidate_urls) - 1:
+                    continue
+                text = await resp.text()
+                if resp.status >= 400:
+                    raise HTTPException(
+                        status_code=resp.status,
+                        detail=f'Failed to get slots ({target_url}): {text}',
+                    )
+                try:
+                    return JSONCodec.loads(text)
+                except Exception:
+                    return {'response': text}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f'Failed to get slots from {root_url}: {e}')
+
+
+async def is_slot_populated(
+    request: Request,
+    url_idx: int,
+    slot_id: int,
+    user: UserModel | None = None,
+) -> bool:
+    """
+    Check llama.cpp GET /slots to determine if the given slot currently holds
+    a cached prompt / KV state in memory (returns False after server restart or erase).
+    """
+    try:
+        slots_data = await fetch_llama_slots(request, url_idx, user=user)
+    except Exception as e:
+        log.debug('Could not inspect slots for url_idx=%d: %s', url_idx, e)
+        return False
+
+    if not isinstance(slots_data, list):
+        return False
+
+    slot_obj = next((s for s in slots_data if isinstance(s, dict) and s.get('id') == slot_id), None)
+    if not isinstance(slot_obj, dict):
+        return False
+
+    if any(k in slot_obj for k in ('n_past', 'cache_tokens', 'prompt')):
+        n_past = slot_obj.get('n_past') or 0
+        cache_tokens = slot_obj.get('cache_tokens') or []
+        prompt = slot_obj.get('prompt') or ''
+        return n_past > 0 or len(cache_tokens) > 0 or bool(prompt)
+
+    task_id = slot_obj.get('id_task', slot_obj.get('task_id', -1))
+    return task_id is not None and task_id != -1
+
+
+async def ensure_slot_restored(
+    request: Request,
+    url_idx: int,
+    slot_id: int,
+    filename: str,
+    user: UserModel | None = None,
+) -> dict:
+    """
+    Restore the slot snapshot if our tracked filename changed OR if llama.cpp's
+    slot is currently empty (e.g., after server restart or idle sleep/wake).
+    """
+    key = (url_idx, slot_id)
+    if _last_restored_slot.get(key) == filename:
+        if await is_slot_populated(request, url_idx, slot_id, user=user):
+            return {'status': 'already_restored', 'slot_id': slot_id, 'filename': filename}
+        _last_restored_slot.pop(key, None)
+
+    return await execute_slot_action(
+        request,
+        url_idx=url_idx,
+        slot_id=slot_id,
+        action='restore',
+        filename=filename,
+        user=user,
+    )
+
+
 async def execute_slot_action(
     request: Request,
     url_idx: int,
@@ -1161,7 +1269,7 @@ async def execute_slot_action(
                 headers=headers,
                 cookies=cookies,
                 ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                timeout=aiohttp.ClientTimeout(total=60),
+                timeout=get_client_timeout(stream=False),
             ) as resp:
                 text = await resp.text()
                 try:
@@ -1209,6 +1317,11 @@ async def prefill_and_save_slot(
     form_data: SlotPrefillAndSaveForm,
     user: UserModel,
 ) -> dict:
+    import copy
+    from uuid import uuid4
+    from open_webui.utils.middleware import process_chat_payload
+    from open_webui.utils.misc import merge_model_params
+
     url_idx = await resolve_url_idx_for_slot(
         request,
         url_idx=form_data.url_idx,
@@ -1230,122 +1343,199 @@ async def prefill_and_save_slot(
         else:
             raise
 
-    # 2. Resolve model name for completion
+    # 2. Resolve model & run the exact same chat payload pipeline as real chats
     _, base_url, key, api_config = await get_llamacpp_connection(url_idx)
-    target_model = form_data.base_model_id or form_data.model_id or ''
-    target_model = strip_provider_model_prefix(target_model, api_config.get('prefix_id'))
+    if not getattr(request.app.state, 'MODELS', None):
+        from open_webui.main import get_all_models as get_all_webui_models
 
-    if not target_model:
-        models = request.app.state.OPENAI_MODELS
-        for m_id, m_val in (models or {}).items():
+        await get_all_webui_models(request, user=user)
+
+    all_models = getattr(request.app.state, 'MODELS', None) or {}
+    base_entry = (
+        copy.deepcopy(all_models.get(form_data.model_id))
+        or copy.deepcopy(all_models.get(form_data.base_model_id))
+        or {}
+    )
+
+    model_info_db = await Models.get_model_by_id(form_data.model_id) if form_data.model_id else None
+    default_model_params = copy.deepcopy(await Config.get('models.default_params', {}) or {})
+    db_params = model_info_db.params.model_dump() if model_info_db and model_info_db.params else {}
+    req_params = {k: v for k, v in (form_data.params or {}).items() if v is not None}
+    merged_params = merge_model_params(default_model_params, merge_model_params(db_params, req_params))
+    if form_data.system is not None:
+        merged_params['system'] = form_data.system
+
+    existing_meta = copy.deepcopy((base_entry.get('info') or {}).get('meta') or {})
+    if form_data.capabilities is not None:
+        existing_meta['capabilities'] = form_data.capabilities
+    if form_data.builtin_tools is not None:
+        existing_meta['builtinTools'] = form_data.builtin_tools
+    if form_data.default_feature_ids is not None:
+        existing_meta['defaultFeatureIds'] = form_data.default_feature_ids
+    if form_data.knowledge is not None:
+        existing_meta['knowledge'] = form_data.knowledge
+    if form_data.skill_ids is not None:
+        existing_meta['skillIds'] = form_data.skill_ids
+    if form_data.terminal_id is not None:
+        existing_meta['terminalId'] = form_data.terminal_id
+    if form_data.tool_ids is not None:
+        existing_meta['toolIds'] = form_data.tool_ids
+    if form_data.filter_ids is not None:
+        existing_meta['filterIds'] = form_data.filter_ids
+
+    synthetic_model = {
+        **base_entry,
+        'id': form_data.model_id or form_data.base_model_id or base_entry.get('id') or 'default',
+        'base_model_id': form_data.base_model_id or base_entry.get('base_model_id'),
+        'info': {
+            **(base_entry.get('info') or {}),
+            'meta': existing_meta,
+            'params': merged_params,
+        },
+    }
+
+    features = dict(form_data.features or {})
+    if not form_data.features:
+        for fid in (form_data.default_feature_ids or []):
+            features[fid] = True
+        user_ui_settings = (
+            user.settings.ui
+            if getattr(user, 'settings', None) and isinstance(getattr(user.settings, 'ui', None), dict)
+            else {}
+        )
+        if user_ui_settings.get('memory', await Config.get('memories.enable', False)):
+            features['memory'] = True
+
+    metadata = {
+        'user_id': user.id,
+        'user_agent': request.headers.get('user-agent', '') or '',
+        'internal': False,
+        'chat_id': str(uuid4()),
+        'session_id': 'slot-prefill',
+        'filter_ids': form_data.filter_ids if form_data.filter_ids is not None else existing_meta.get('filterIds', []),
+        'tool_ids': form_data.tool_ids if form_data.tool_ids is not None else existing_meta.get('toolIds'),
+        'features': features,
+        'variables': form_data.variables or {},
+        'model': synthetic_model,
+        'params': {
+            'function_calling': merged_params.get('function_calling') or 'native',
+        },
+    }
+
+    dummy_msg = form_data.dummy_message or 'ciao'
+    target_upstream_model = form_data.base_model_id or form_data.model_id or ''
+    target_upstream_model = strip_provider_model_prefix(target_upstream_model, api_config.get('prefix_id'))
+    if not target_upstream_model:
+        openai_models = request.app.state.OPENAI_MODELS
+        for m_id, m_val in (openai_models or {}).items():
             if m_val.get('urlIdx') == url_idx:
-                target_model = strip_provider_model_prefix(m_id, api_config.get('prefix_id'))
+                target_upstream_model = strip_provider_model_prefix(m_id, api_config.get('prefix_id'))
                 break
 
-    # Resolve custom & builtin tools
-    tools_specs = []
-    seen_tool_names: set[str] = set()
-    if form_data.tools:
-        tools_specs = list(form_data.tools)
-        for t in tools_specs:
-            fn = t.get('function') if isinstance(t, dict) else None
-            if isinstance(fn, dict) and fn.get('name'):
-                seen_tool_names.add(fn['name'])
-    else:
-        if form_data.tool_ids:
-            from open_webui.models.tools import Tools
-
-            db_tool_ids = [tid for tid in form_data.tool_ids if not tid.startswith('server:')]
-            if db_tool_ids:
-                db_tools = await Tools.get_tools_by_ids(db_tool_ids)
-                for t in db_tools.values():
-                    if t.specs:
-                        for s in t.specs:
-                            name = s.get('name')
-                            if name and name not in seen_tool_names:
-                                seen_tool_names.add(name)
-                                tools_specs.append({'type': 'function', 'function': s})
-
-        capabilities = form_data.capabilities if form_data.capabilities is not None else {'builtin_tools': True}
-        if capabilities.get('builtin_tools', True):
-            try:
-                from open_webui.utils.tools import get_builtin_tools
-
-                model_dict = {
-                    'id': form_data.model_id or form_data.base_model_id or '',
-                    'info': {
-                        'meta': {
-                            'capabilities': capabilities,
-                            'builtinTools': form_data.builtin_tools or {},
-                        }
-                    },
-                }
-                features_dict = {fid: True for fid in (form_data.default_feature_ids or [])}
-                builtin_dict = await get_builtin_tools(
-                    request,
-                    {'__user__': user.model_dump()},
-                    features=features_dict,
-                    model=model_dict,
-                )
-                for t_val in builtin_dict.values():
-                    spec = t_val.get('spec') if isinstance(t_val, dict) else None
-                    if isinstance(spec, dict):
-                        name = spec.get('name')
-                        if name and name not in seen_tool_names:
-                            seen_tool_names.add(name)
-                            tools_specs.append({'type': 'function', 'function': spec})
-            except Exception as e:
-                log.warning('Failed to resolve builtin tools for slot prefill: %s', e)
-
-    # Prepare chat completion messages
-    messages = []
-    if form_data.system:
-        messages.append({'role': 'system', 'content': form_data.system})
-    messages.append({'role': 'user', 'content': form_data.dummy_message or 'ciao'})
-
-    completion_payload = {
-        'model': target_model or 'default',
-        'messages': messages,
-        'max_tokens': 1,
-        'cache_prompt': True,
-        'id_slot': slot_id,
-        'stream': False,
-    }
-    if tools_specs:
-        completion_payload['tools'] = tools_specs
-
-    # Send completion to llama.cpp
-    chat_url = f"{base_url.rstrip('/')}/chat/completions"
-    headers, cookies = await get_headers_and_cookies(request, base_url, key, api_config, user=user)
-
-    session = await get_session()
+    mcp_clients = {}
     try:
-        async with session.post(
-            chat_url,
-            data=JSONCodec.dumps(completion_payload),
-            headers=headers,
-            cookies=cookies,
-            ssl=AIOHTTP_CLIENT_SESSION_SSL,
-            timeout=aiohttp.ClientTimeout(total=120),
-        ) as resp:
-            text = await resp.text()
-            if resp.status >= 400:
-                raise HTTPException(status_code=resp.status, detail=f'llama.cpp prefill completion error: {text}')
+        if form_data.tools:
+            processed_messages = []
+            if merged_params.get('system'):
+                processed_messages.append({'role': 'system', 'content': merged_params['system']})
+            processed_messages.append({'role': 'user', 'content': dummy_msg})
+            processed_tools = list(form_data.tools)
+        else:
+            pipeline_payload = {
+                'model': synthetic_model['id'],
+                'messages': [{'role': 'user', 'content': dummy_msg}],
+                'params': copy.deepcopy(merged_params),
+                'tool_ids': metadata['tool_ids'],
+                'skill_ids': form_data.skill_ids if form_data.skill_ids is not None else existing_meta.get('skillIds'),
+                'terminal_id': form_data.terminal_id or existing_meta.get('terminalId'),
+                'filter_ids': metadata['filter_ids'],
+                'features': copy.deepcopy(features),
+                'variables': dict(form_data.variables or {}),
+                'stream': False,
+            }
+            processed_form_data, processed_metadata, _ = await process_chat_payload(
+                request,
+                pipeline_payload,
+                user,
+                metadata,
+                synthetic_model,
+            )
+            mcp_clients = processed_metadata.get('mcp_clients') or {}
+
+            model_system = merged_params.get('system')
+            if model_system:
+                processed_form_data = await apply_system_prompt_to_body(
+                    model_system,
+                    processed_form_data,
+                    processed_metadata,
+                    user,
+                )
+
+            raw_messages = processed_form_data.get('messages') or []
+            sys_msgs = [m for m in raw_messages if m.get('role') == 'system']
+            processed_messages = [*sys_msgs[:1], {'role': 'user', 'content': dummy_msg}]
+            processed_tools = processed_form_data.get('tools')
+
+        completion_payload = {
+            'model': target_upstream_model or 'default',
+            'messages': processed_messages,
+            'max_tokens': 1,
+            'cache_prompt': True,
+            'id_slot': slot_id,
+            'stream': False,
+        }
+        if processed_tools:
+            completion_payload['tools'] = processed_tools
+
+        chat_url = f"{base_url.rstrip('/')}/chat/completions"
+        headers, cookies = await get_headers_and_cookies(request, base_url, key, api_config, user=user)
+
+        session = await get_session()
+        try:
+            async with session.post(
+                chat_url,
+                data=JSONCodec.dumps(completion_payload),
+                headers=headers,
+                cookies=cookies,
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                timeout=get_client_timeout(stream=False),
+            ) as resp:
+                text = await resp.text()
+                if resp.status >= 400:
+                    raise HTTPException(status_code=resp.status, detail=f'llama.cpp prefill completion error: {text}')
+                try:
+                    prefill_res = JSONCodec.loads(text)
+                except Exception:
+                    prefill_res = {'response': text}
+        except aiohttp.ClientError as e:
+            raise HTTPException(
+                status_code=502,
+                detail=f'Failed to connect to llama.cpp completion endpoint at {chat_url}: {e}',
+            )
+    finally:
+        for client in mcp_clients.values():
             try:
-                prefill_res = JSONCodec.loads(text)
+                await client.close()
             except Exception:
-                prefill_res = {'response': text}
-    except aiohttp.ClientError as e:
-        raise HTTPException(status_code=502, detail=f'Failed to connect to llama.cpp completion endpoint at {chat_url}: {e}')
+                pass
 
     # 3. Save slot
     save_res = await execute_slot_action(request, url_idx, slot_id, 'save', filename=filename, user=user)
+
+    prompt_tokens = None
+    if isinstance(prefill_res, dict):
+        usage = prefill_res.get('usage')
+        if isinstance(usage, dict):
+            prompt_tokens = usage.get('prompt_tokens')
+    if prompt_tokens is None and isinstance(save_res, dict):
+        prompt_tokens = save_res.get('n_saved')
 
     return {
         'status': 'ok',
         'slot_id': slot_id,
         'filename': filename,
-        'tools_count': len(tools_specs),
+        'tools_count': len(processed_tools) if processed_tools else 0,
+        'prompt_tokens': prompt_tokens,
         'prefill': prefill_res,
         'save': save_res,
     }
@@ -1364,6 +1554,17 @@ async def perform_slot_action(
         base_model_id=form_data.base_model_id,
         user=user,
     )
+    if form_data.action == 'ensure':
+        if not form_data.filename:
+            raise HTTPException(status_code=400, detail='Filename is required for slot ensure')
+        return await ensure_slot_restored(
+            request,
+            url_idx=url_idx,
+            slot_id=form_data.slot_id,
+            filename=form_data.filename.strip(),
+            user=user,
+        )
+
     return await execute_slot_action(
         request,
         url_idx=url_idx,
@@ -1396,33 +1597,7 @@ async def get_llama_slots(
         model_id=model_id,
         user=user,
     )
-    root_url, base_url, key, api_config = await get_llamacpp_connection(resolved_idx)
-    headers, cookies = await get_headers_and_cookies(request, root_url, key, api_config, user=user)
-
-    candidate_urls = [f'{root_url.rstrip("/")}/slots']
-    base_trimmed = base_url.rstrip('/')
-    if base_trimmed != root_url.rstrip('/'):
-        candidate_urls.append(f'{base_trimmed}/slots')
-
-    session = await get_session()
-    try:
-        for idx_url, target_url in enumerate(candidate_urls):
-            async with session.get(
-                target_url,
-                headers=headers,
-                cookies=cookies,
-                ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as resp:
-                if resp.status == 404 and idx_url < len(candidate_urls) - 1:
-                    continue
-                text = await resp.text()
-                try:
-                    return JSONCodec.loads(text)
-                except Exception:
-                    return {'response': text}
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f'Failed to get slots from {root_url}: {e}')
+    return await fetch_llama_slots(request, resolved_idx, user=user)
 
 
 class ConnectionVerificationForm(BaseModel):
@@ -1910,22 +2085,22 @@ async def generate_chat_completion(
                 payload['id_slot'] = slot_id
             if slot_meta.get('auto_restore', True) and slot_meta.get('filename'):
                 slot_filename = slot_meta.get('filename', '').strip()
-                if slot_filename and _last_restored_slot.get((idx, slot_id)) != slot_filename:
+                if slot_filename:
                     try:
-                        await execute_slot_action(
+                        res = await ensure_slot_restored(
                             request,
                             url_idx=idx,
                             slot_id=slot_id,
-                            action='restore',
                             filename=slot_filename,
                             user=user,
                         )
-                        log.info(
-                            'Auto-restored slot %d with filename %s for model %s',
-                            slot_id,
-                            slot_filename,
-                            model_id,
-                        )
+                        if res.get('status') != 'already_restored':
+                            log.info(
+                                'Auto-restored slot %d with filename %s for model %s',
+                                slot_id,
+                                slot_filename,
+                                model_id,
+                            )
                     except Exception as e:
                         log.warning(
                             'Failed to auto-restore slot %d with filename %s for model %s: %s',
