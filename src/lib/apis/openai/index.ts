@@ -482,6 +482,27 @@ export const synthesizeOpenAISpeech = async (
 	return res;
 };
 
+const parseResponseOrThrow = async (res: Response) => {
+	const text = await res.text();
+	let data: any = null;
+	if (text) {
+		try {
+			data = JSON.parse(text);
+		} catch {
+			data = null;
+		}
+	}
+
+	if (!res.ok) {
+		if (data !== null) {
+			throw data;
+		}
+		throw text.trim() || res.statusText || `HTTP ${res.status}`;
+	}
+
+	return data ?? (text ? { response: text } : {});
+};
+
 export const executeSlotAction = async (
 	token: string = '',
 	payload: {
@@ -504,10 +525,7 @@ export const executeSlotAction = async (
 		},
 		body: JSON.stringify(payload)
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseResponseOrThrow)
 		.catch((err) => {
 			console.error(err);
 			error = getErrorMessage(err);
@@ -531,6 +549,13 @@ export const prefillAndSaveSlot = async (
 		filename: string;
 		system?: string;
 		tool_ids?: string[];
+		skill_ids?: string[];
+		filter_ids?: string[];
+		terminal_id?: string;
+		knowledge?: any[];
+		params?: Record<string, any>;
+		features?: Record<string, any>;
+		variables?: Record<string, any>;
 		tools?: any[];
 		capabilities?: Record<string, any>;
 		builtin_tools?: Record<string, boolean>;
@@ -549,10 +574,7 @@ export const prefillAndSaveSlot = async (
 		},
 		body: JSON.stringify(payload)
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseResponseOrThrow)
 		.catch((err) => {
 			console.error(err);
 			error = getErrorMessage(err);
@@ -584,10 +606,7 @@ export const getLlamaSlots = async (
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
+		.then(parseResponseOrThrow)
 		.catch((err) => {
 			console.error(err);
 			error = getErrorMessage(err);

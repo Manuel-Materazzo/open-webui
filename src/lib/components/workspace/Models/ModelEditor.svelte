@@ -945,7 +945,12 @@
 						<SlotConfig
 							bind:slot={slotConfig}
 							{system}
+							{params}
+							{knowledge}
 							{toolIds}
+							{skillIds}
+							{filterIds}
+							{terminalId}
 							{capabilities}
 							{builtinTools}
 							{defaultFeatureIds}

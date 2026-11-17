@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
+	import { config, settings, user } from '$lib/stores';
+	import { getPromptVariables } from '$lib/utils';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { executeSlotAction, prefillAndSaveSlot } from '$lib/apis/openai';
@@ -20,7 +22,12 @@
 	};
 
 	export let system: string = '';
+	export let params: Record<string, any> = {};
+	export let knowledge: any[] = [];
 	export let toolIds: string[] = [];
+	export let skillIds: string[] = [];
+	export let filterIds: string[] = [];
+	export let terminalId: string = '';
 	export let capabilities: Record<string, any> = {};
 	export let builtinTools: Record<string, boolean> = {};
 	export let defaultFeatureIds: string[] = [];
@@ -78,21 +85,59 @@
 
 		loadingAction = 'prefill';
 		try {
+			const features: Record<string, any> = {
+				image_generation:
+					Boolean(capabilities?.image_generation) &&
+					Boolean($config?.features?.enable_image_generation) &&
+					defaultFeatureIds.includes('image_generation'),
+				code_interpreter:
+					Boolean(capabilities?.code_interpreter) &&
+					Boolean($config?.features?.enable_code_interpreter) &&
+					defaultFeatureIds.includes('code_interpreter'),
+				web_search:
+					Boolean(capabilities?.web_search) &&
+					Boolean($config?.features?.enable_web_search) &&
+					defaultFeatureIds.includes('web_search')
+			};
+
+			if ($settings?.memory ?? $config?.features?.enable_memories ?? false) {
+				features.memory = true;
+			}
+
+			const variables = getPromptVariables(
+				$user?.name,
+				undefined,
+				$user?.email
+			);
+
 			const res = await prefillAndSaveSlot(localStorage.token, {
 				model_id: modelId || undefined,
 				base_model_id: baseModelId || undefined,
 				slot_id: Number(slot.slot_id) || 0,
 				filename: filename,
 				system: system || undefined,
+				params: { ...($settings?.params ?? {}), ...params },
 				tool_ids: toolIds.length > 0 ? toolIds : undefined,
+				skill_ids: skillIds.length > 0 ? skillIds : undefined,
+				filter_ids: filterIds.length > 0 ? filterIds : undefined,
+				terminal_id: terminalId || undefined,
+				knowledge: knowledge.length > 0 ? knowledge : undefined,
 				capabilities,
 				builtin_tools: builtinTools,
-				default_feature_ids: defaultFeatureIds.length > 0 ? defaultFeatureIds : undefined
+				default_feature_ids: defaultFeatureIds.length > 0 ? defaultFeatureIds : undefined,
+				features,
+				variables
 			});
 
 			slot.filename = filename;
-			const toolsInfo = res?.tools_count !== undefined ? ` · ${res.tools_count} tools` : '';
-			lastStatus = `Saved (${filename}${toolsInfo})`;
+			const parts = [filename];
+			if (res?.prompt_tokens !== undefined && res?.prompt_tokens !== null) {
+				parts.push(`${res.prompt_tokens} tokens`);
+			}
+			if (res?.tools_count !== undefined && res?.tools_count !== null) {
+				parts.push(`${res.tools_count} tools`);
+			}
+			lastStatus = `Saved (${parts.join(' · ')})`;
 			toast.success(
 				$i18n.t('Slot {{slot}} prefilled and saved to {{filename}} successfully!', {
 					slot: Number(slot.slot_id) || 0,

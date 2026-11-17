@@ -187,18 +187,18 @@
 		if (slot?.enabled && slot?.auto_restore && slot?.filename) {
 			const key = `${model.id}:${slot.slot_id ?? 0}:${slot.filename}`;
 			if (key === lastAutoRestoredSlotKey) return;
-			lastAutoRestoredSlotKey = key;
 
 			try {
 				await executeSlotAction(localStorage.token, {
 					model_id: model.id,
 					base_model_id: (model as any)?.base_model_id,
 					slot_id: Number(slot.slot_id) || 0,
-					action: 'restore',
+					action: 'ensure',
 					filename: slot.filename
 				});
+				lastAutoRestoredSlotKey = key;
 				console.log(
-					`[llama.cpp slot] Auto-restored slot ${slot.slot_id ?? 0} with ${slot.filename} for model ${model.name || model.id}`
+					`[llama.cpp slot] Ensured slot ${slot.slot_id ?? 0} with ${slot.filename} for model ${model.name || model.id}`
 				);
 			} catch (err) {
 				console.warn('[llama.cpp slot] Failed to auto-restore slot:', err);
