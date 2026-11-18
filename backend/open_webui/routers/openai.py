@@ -1057,6 +1057,8 @@ async def delete_provider_model(
 
 # Track the last restored slot snapshot: (url_idx, slot_id) -> filename
 _last_restored_slot: dict[tuple[int, int], str] = {}
+_metrics_supported: dict[int, bool] = {}
+_last_prompt_tokens_total: dict[int, float] = {}
 
 
 class SlotActionForm(BaseModel):
@@ -1174,6 +1176,51 @@ async def fetch_llama_slots(
         raise HTTPException(status_code=502, detail=f'Failed to get slots from {root_url}: {e}')
 
 
+async def _check_metrics_reset(
+    request: Request,
+    url_idx: int,
+    user: UserModel | None = None,
+) -> bool:
+    """
+    If llama-server exposes /metrics, check whether prompt_tokens_total reset
+    (indicating the server restarted since the last slot save/restore).
+    """
+    if _metrics_supported.get(url_idx) is False:
+        return False
+
+    try:
+        root_url, _, key, api_config = await get_llamacpp_connection(url_idx)
+        headers, cookies = await get_headers_and_cookies(request, root_url, key, api_config, user=user)
+        session = await get_session()
+        async with session.get(
+            f'{root_url.rstrip("/")}/metrics',
+            headers=headers,
+            cookies=cookies,
+            ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            timeout=aiohttp.ClientTimeout(total=3),
+        ) as resp:
+            if resp.status in (404, 501):
+                _metrics_supported[url_idx] = False
+                return False
+            if resp.status >= 400:
+                return False
+            text = await resp.text()
+            m = re.search(r'^llamacpp:prompt_tokens_total\s+([0-9eE.+\-]+)', text, re.MULTILINE)
+            if not m:
+                return False
+            _metrics_supported[url_idx] = True
+            current_val = float(m.group(1))
+            prev_val = _last_prompt_tokens_total.get(url_idx)
+            _last_prompt_tokens_total[url_idx] = current_val
+            if prev_val is not None and current_val < prev_val:
+                return True
+            if prev_val is not None and prev_val > 0 and current_val == 0:
+                return True
+    except Exception:
+        return False
+    return False
+
+
 async def is_slot_populated(
     request: Request,
     url_idx: int,
@@ -1181,8 +1228,8 @@ async def is_slot_populated(
     user: UserModel | None = None,
 ) -> bool:
     """
-    Check llama.cpp GET /slots to determine if the given slot currently holds
-    a cached prompt / KV state in memory (returns False after server restart or erase).
+    Check llama.cpp GET /slots (and /metrics if available) to determine if the
+    given slot still holds its cached state (returns False if server restarted or empty).
     """
     try:
         slots_data = await fetch_llama_slots(request, url_idx, user=user)
@@ -1203,8 +1250,13 @@ async def is_slot_populated(
         prompt = slot_obj.get('prompt') or ''
         return n_past > 0 or len(cache_tokens) > 0 or bool(prompt)
 
-    task_id = slot_obj.get('id_task', slot_obj.get('task_id', -1))
-    return task_id is not None and task_id != -1
+    # Modern llama.cpp GET /slots leaves id_task == -1 whenever a slot is idle
+    # and omits n_past/cache_tokens/prompt, so id_task == -1 does NOT mean empty.
+    # Check /metrics reset if available; otherwise assume the slot is still warm.
+    if await _check_metrics_reset(request, url_idx, user=user):
+        return False
+
+    return True
 
 
 async def ensure_slot_restored(
