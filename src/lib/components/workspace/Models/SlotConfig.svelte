@@ -285,7 +285,7 @@
 						{$i18n.t('Auto-restore on use')}
 					</span>
 					<span class="text-[0.6875rem] text-gray-400 dark:text-gray-500">
-						{$i18n.t('Automatically restore this slot cache when the model is selected or used in chat.')}
+						{$i18n.t('Automatically restore this slot cache when the model is used in chat.')}
 					</span>
 				</div>
 
